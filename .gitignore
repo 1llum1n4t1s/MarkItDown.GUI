@@ -1,4 +1,5 @@
-.idea/
 .vs/
-MarkItDownX/bin/
-MarkItDownX/obj/
+bin/
+obj/
+.vscode/
+.idea/
