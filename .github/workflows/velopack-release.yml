@@ -1,0 +1,50 @@
+name: Velopack リリース
+
+on:
+  push:
+    branches:
+      - releases
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      VPK_VERSION: 1.0.${{ github.run_number }}
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: .NET SDK をセットアップ
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: 依存関係を復元
+        run: dotnet restore MarkItDownX/MarkItDownX.csproj
+
+      - name: アプリを発行
+        run: dotnet publish MarkItDownX/MarkItDownX.csproj -c Release -o artifacts/publish
+
+      - name: Velopack CLI をインストール
+        run: dotnet tool install --global vpk
+
+      - name: Velopack パッケージを作成
+        run: |
+          vpk pack \
+            --packId MarkItDownX \
+            --packVersion $env:VPK_VERSION \
+            --packDir artifacts/publish \
+            --outputDir artifacts/releases
+
+      - name: GitHub Releases へアップロード
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          vpk upload github \
+            --repo ${{ github.repository }} \
+            --releaseDir artifacts/releases \
+            --tag v$env:VPK_VERSION \
+            --token $env:GITHUB_TOKEN
