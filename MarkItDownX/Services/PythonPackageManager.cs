@@ -6,7 +6,7 @@ using System.Text;
 namespace MarkItDownX.Services;
 
 /// <summary>
-/// Pythonパッケージの管理を担当するクラスなのだ
+/// Responsible for managing Python packages
 /// </summary>
 public class PythonPackageManager
 {
@@ -14,10 +14,10 @@ public class PythonPackageManager
     private readonly Action<string> _logMessage;
 
     /// <summary>
-    /// コンストラクタなのだ
+    /// Constructor
     /// </summary>
-    /// <param name="pythonExecutablePath">Python実行ファイルのパスなのだ</param>
-    /// <param name="logMessage">ログ出力関数なのだ</param>
+    /// <param name="pythonExecutablePath">Path to Python executable</param>
+    /// <param name="logMessage">Log output function</param>
     public PythonPackageManager(string pythonExecutablePath, Action<string> logMessage)
     {
         _pythonExecutablePath = pythonExecutablePath;
@@ -25,7 +25,7 @@ public class PythonPackageManager
     }
 
     /// <summary>
-    /// pipを使用してMarkItDownとffmpegを自動インストールするのだ
+    /// Automatically install MarkItDown and FFmpeg using pip
     /// </summary>
     public void InstallMarkItDownPackage()
     {
@@ -89,13 +89,14 @@ public class PythonPackageManager
             using var checkProc = Process.Start(checkInfo);
             if (checkProc != null)
             {
-                checkProc.WaitForExit(3000);
+                checkProc.WaitForExit(TimeoutSettings.PythonVersionCheckTimeoutMs);
                 return checkProc.ExitCode == 0;
             }
             return false;
         }
-        catch
+        catch (Exception ex)
         {
+            System.Diagnostics.Debug.WriteLine($"Failed to check markitdown installation: {ex.Message}");
             return false;
         }
     }
@@ -123,7 +124,7 @@ public class PythonPackageManager
             {
                 string output = uninstallProc.StandardOutput.ReadToEnd();
                 string error = uninstallProc.StandardError.ReadToEnd();
-                uninstallProc.WaitForExit(30000);
+                uninstallProc.WaitForExit(TimeoutSettings.PackageUninstallTimeoutMs);
                 _logMessage($"pipアンインストール出力: {output}");
                 if (!string.IsNullOrEmpty(error))
                     _logMessage($"pipアンインストールエラー: {error}");
@@ -167,7 +168,7 @@ public class PythonPackageManager
             {
                 string output = installProc.StandardOutput.ReadToEnd();
                 string error = installProc.StandardError.ReadToEnd();
-                installProc.WaitForExit(60000);
+                installProc.WaitForExit(TimeoutSettings.PackageInstallTimeoutMs);
                 _logMessage($"pip出力: {output}");
                 if (!string.IsNullOrEmpty(error))
                     _logMessage($"pipエラー: {error}");
@@ -216,7 +217,7 @@ public class PythonPackageManager
                 {
                     string output = checkFfmpegProc.StandardOutput.ReadToEnd();
                     string error = checkFfmpegProc.StandardError.ReadToEnd();
-                    checkFfmpegProc.WaitForExit(5000);
+                    checkFfmpegProc.WaitForExit(TimeoutSettings.FFmpegCheckTimeoutMs);
                     
                     if (checkFfmpegProc.ExitCode == 0)
                     {
@@ -257,7 +258,7 @@ public class PythonPackageManager
                 {
                     string output = checkWingetProc.StandardOutput.ReadToEnd();
                     string error = checkWingetProc.StandardError.ReadToEnd();
-                    checkWingetProc.WaitForExit(5000);
+                    checkWingetProc.WaitForExit(TimeoutSettings.FFmpegCheckTimeoutMs);
                     
                     if (checkWingetProc.ExitCode == 0 && output.Contains("Gyan.FFmpeg"))
                     {
@@ -295,7 +296,7 @@ public class PythonPackageManager
                 {
                     string output = wingetProc.StandardOutput.ReadToEnd();
                     string error = wingetProc.StandardError.ReadToEnd();
-                    wingetProc.WaitForExit(120000); // 2分のタイムアウト
+                    wingetProc.WaitForExit(TimeoutSettings.FFmpegInstallTimeoutMs);
                     _logMessage($"winget出力: {output}");
                     if (!string.IsNullOrEmpty(error))
                         _logMessage($"wingetエラー: {error}");

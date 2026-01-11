@@ -1,4 +1,5 @@
 ﻿using System.Windows;
+using MarkItDownX.Services;
 using Velopack;
 
 namespace MarkItDownX;
@@ -8,11 +9,13 @@ namespace MarkItDownX;
 /// </summary>
 public partial class App : Application
 {
-    private const string UpdateFeedUrl = "https://github.com/1llum1n4t1s/MarkItDownX/releases/latest/download";
-
     protected override async void OnStartup(StartupEventArgs e)
     {
-        var updateManager = new UpdateManager(UpdateFeedUrl);
+        // Load application settings from configuration file
+        AppSettings.LoadSettings();
+        var updateFeedUrl = AppSettings.GetUpdateFeedUrl();
+
+        var updateManager = new UpdateManager(updateFeedUrl);
         var updateInfo = await updateManager.CheckForUpdatesAsync();
         if (updateInfo is not null)
         {

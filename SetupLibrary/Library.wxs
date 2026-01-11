@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
 	<Fragment>
-		<!-- TODO: Put your code here. -->
+		<!-- Shared library component definitions for installer -->
+		<!-- Add components for shared assemblies and dependencies as needed -->
+		<ComponentGroup Id="SharedComponents">
+			<!-- Define shared library files here -->
+			<!-- Example: <Component Id="cmp_SharedAssembly" ... /> -->
+		</ComponentGroup>
 	</Fragment>
 </Wix>

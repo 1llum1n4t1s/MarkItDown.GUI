@@ -8,7 +8,7 @@ using Newtonsoft.Json;
 namespace MarkItDownX.Services;
 
 /// <summary>
-/// ファイル処理を担当するクラスなのだ
+/// Responsible for file processing
 /// </summary>
 public class FileProcessor
 {
@@ -16,10 +16,10 @@ public class FileProcessor
     private readonly Action<string> _logMessage;
 
     /// <summary>
-    /// コンストラクタなのだ
+    /// Constructor
     /// </summary>
-    /// <param name="markItDownProcessor">MarkItDown処理クラスなのだ</param>
-    /// <param name="logMessage">ログ出力関数なのだ</param>
+    /// <param name="markItDownProcessor">MarkItDown processor class</param>
+    /// <param name="logMessage">Log output function</param>
     public FileProcessor(MarkItDownProcessor markItDownProcessor, Action<string> logMessage)
     {
         _markItDownProcessor = markItDownProcessor;
@@ -27,9 +27,34 @@ public class FileProcessor
     }
 
     /// <summary>
-    /// ドロップされたアイテムを処理するのだ
+    /// Validate file path to prevent path traversal attacks
     /// </summary>
-    /// <param name="paths">ドロップされたパスの配列なのだ</param>
+    /// <param name="path">Path to validate</param>
+    /// <returns>True if path is valid and safe</returns>
+    private bool IsValidPath(string path)
+    {
+        try
+        {
+            // Get the full canonical path
+            var fullPath = Path.GetFullPath(path);
+
+            // Check for path traversal attempts
+            if (fullPath.Contains(".."))
+                return false;
+
+            // Verify the path exists and is accessible
+            return File.Exists(fullPath) || Directory.Exists(fullPath);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Process dropped items
+    /// </summary>
+    /// <param name="paths">Array of dropped paths</param>
     public async Task ProcessDroppedItemsAsync(string[] paths)
     {
         var files = new List<string>();
@@ -37,13 +62,20 @@ public class FileProcessor
 
         foreach (var path in paths)
         {
+            // Validate path for security
+            if (!IsValidPath(path))
+            {
+                _logMessage($"Invalid path rejected: {path}");
+                continue;
+            }
+
             if (File.Exists(path))
             {
-                files.Add(path);
+                files.Add(Path.GetFullPath(path));
             }
             else if (Directory.Exists(path))
             {
-                folders.Add(path);
+                folders.Add(Path.GetFullPath(path));
             }
         }
 
@@ -54,10 +86,10 @@ public class FileProcessor
     }
 
     /// <summary>
-    /// MarkItDownを使用してファイルとフォルダを処理するのだ
+    /// Process files and folders using MarkItDown
     /// </summary>
-    /// <param name="files">処理するファイルのリストなのだ</param>
-    /// <param name="folders">処理するフォルダのリストなのだ</param>
+    /// <param name="files">List of files to process</param>
+    /// <param name="folders">List of folders to process</param>
     private async Task ProcessFilesWithMarkItDownAsync(List<string> files, List<string> folders)
     {
         try

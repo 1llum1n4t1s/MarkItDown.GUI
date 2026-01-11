@@ -6,7 +6,7 @@ using System.Text;
 namespace MarkItDownX.Services;
 
 /// <summary>
-/// MarkItDown処理を担当するクラスなのだ
+/// Responsible for MarkItDown processing
 /// </summary>
 public class MarkItDownProcessor
 {
@@ -14,10 +14,10 @@ public class MarkItDownProcessor
     private readonly Action<string> _logMessage;
 
     /// <summary>
-    /// コンストラクタなのだ
+    /// Constructor
     /// </summary>
-    /// <param name="pythonExecutablePath">Python実行ファイルのパスなのだ</param>
-    /// <param name="logMessage">ログ出力関数なのだ</param>
+    /// <param name="pythonExecutablePath">Path to Python executable</param>
+    /// <param name="logMessage">Log output function</param>
     public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage)
     {
         _pythonExecutablePath = pythonExecutablePath;
@@ -25,9 +25,9 @@ public class MarkItDownProcessor
     }
 
     /// <summary>
-    /// MarkItDownライブラリのダウンロード状況をチェックするのだ
+    /// Check MarkItDown library availability
     /// </summary>
-    /// <returns>ライブラリが利用可能かどうかなのだ</returns>
+    /// <returns>True if library is available</returns>
     public bool CheckMarkItDownAvailability()
     {
         try
@@ -52,7 +52,6 @@ public class MarkItDownProcessor
                 var startInfo = new ProcessStartInfo
                 {
                     FileName = _pythonExecutablePath,
-                    Arguments = $"\"{scriptPath}\"",
                     WorkingDirectory = appDir,
                     UseShellExecute = false,
                     RedirectStandardOutput = true,
@@ -62,6 +61,9 @@ public class MarkItDownProcessor
                     StandardErrorEncoding = Encoding.UTF8
                 };
 
+                // Use argument list for secure command execution (prevents command injection)
+                startInfo.ArgumentList.Add(scriptPath);
+
                 _logMessage($"Python実行パス: {_pythonExecutablePath}");
                 _logMessage($"Python引数: {startInfo.Arguments}");
                 _logMessage($"作業ディレクトリ: {startInfo.WorkingDirectory}");
@@ -69,12 +71,11 @@ public class MarkItDownProcessor
                 using var process = Process.Start(startInfo);
                 if (process != null)
                 {
-                    var startTime = DateTime.Now;
-                    process.WaitForExit(30000);
-                    var endTime = DateTime.Now;
-                    var executionTime = endTime - startTime;
-                        
-                    _logMessage($"プロセス実行時間: {executionTime.TotalMilliseconds}ms");
+                    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                    process.WaitForExit(TimeoutSettings.MarkItDownCheckTimeoutMs);
+                    stopwatch.Stop();
+
+                    _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
                         
                     // プロセス終了後に出力を読み取る
                     var output = process.StandardOutput.ReadToEnd();
@@ -133,11 +134,11 @@ public class MarkItDownProcessor
     }
 
     /// <summary>
-    /// MarkItDown変換用のPythonスクリプトを実行するのだ
+    /// Execute Python script for MarkItDown conversion
     /// </summary>
-    /// <param name="appDir">アプリケーションディレクトリなのだ</param>
-    /// <param name="filePathsJson">ファイルパスのJSON文字列なのだ</param>
-    /// <param name="folderPathsJson">フォルダパスのJSON文字列なのだ</param>
+    /// <param name="appDir">Application directory</param>
+    /// <param name="filePathsJson">JSON string of file paths</param>
+    /// <param name="folderPathsJson">JSON string of folder paths</param>
     public void ExecuteMarkItDownConvertScript(string appDir, string filePathsJson, string folderPathsJson)
     {
         try
@@ -158,7 +159,6 @@ public class MarkItDownProcessor
             var startInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
-                Arguments = $"\"{scriptPath}\" \"{filePathsJson}\" \"{folderPathsJson}\"",
                 WorkingDirectory = appDir,
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
@@ -168,15 +168,19 @@ public class MarkItDownProcessor
                 StandardErrorEncoding = Encoding.UTF8
             };
 
+            // Use argument list for secure command execution (prevents command injection)
+            startInfo.ArgumentList.Add(scriptPath);
+            startInfo.ArgumentList.Add(filePathsJson);
+            startInfo.ArgumentList.Add(folderPathsJson);
+
             using var process = Process.Start(startInfo);
             if (process != null)
             {
-                var startTime = DateTime.Now;
-                process.WaitForExit(30000);
-                var endTime = DateTime.Now;
-                var executionTime = endTime - startTime;
-                    
-                _logMessage($"プロセス実行時間: {executionTime.TotalMilliseconds}ms");
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                process.WaitForExit(TimeoutSettings.MarkItDownCheckTimeoutMs);
+                stopwatch.Stop();
+
+                _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
                     
                 // プロセス終了後に出力を読み取る
                 var output = process.StandardOutput.ReadToEnd();
@@ -206,10 +210,10 @@ public class MarkItDownProcessor
     }
 
     /// <summary>
-    /// MarkItDownライブラリチェック用のPythonスクリプトを作成するのだ
+    /// Create Python script for checking MarkItDown library availability
     /// </summary>
-    /// <param name="appDir">アプリケーションディレクトリなのだ</param>
-    /// <returns>Pythonスクリプトの内容なのだ</returns>
+    /// <param name="appDir">Application directory</param>
+    /// <returns>Python script content</returns>
     private string CreateMarkItDownCheckScript(string appDir)
     {
         // Windowsパスのバックスラッシュをエスケープする

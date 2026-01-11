@@ -7,7 +7,7 @@ using System.Text;
 namespace MarkItDownX.Services;
 
 /// <summary>
-/// Python環境の管理を担当するクラスなのだ
+/// Responsible for managing Python environment
 /// </summary>
 public class PythonEnvironmentManager
 {
@@ -16,16 +16,16 @@ public class PythonEnvironmentManager
     private readonly Action<string> _logMessage;
 
     /// <summary>
-    /// コンストラクタなのだ
+    /// Constructor
     /// </summary>
-    /// <param name="logMessage">ログ出力関数なのだ</param>
+    /// <param name="logMessage">Log output function</param>
     public PythonEnvironmentManager(Action<string> logMessage)
     {
         _logMessage = logMessage;
     }
 
     /// <summary>
-    /// Python環境の初期化を行うのだ
+    /// Initialize Python environment
     /// </summary>
     public void Initialize()
     {
@@ -70,90 +70,43 @@ public class PythonEnvironmentManager
     {
         try
         {
-            _logMessage("Python実行ファイル検索開始");
-                
-            // 一般的なPythonインストールパスをチェック
-            var possiblePaths = new List<string>
-            {
-                @"C:\Python39\python.exe",
-                @"C:\Python310\python.exe",
-                @"C:\Python311\python.exe",
-                @"C:\Python312\python.exe",
-                @"C:\Python313\python.exe",
-                @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python39\python.exe",
-                @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python310\python.exe",
-                @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python311\python.exe",
-                @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python312\python.exe",
-                @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python313\python.exe"
-            };
+            _logMessage("Starting Python executable search");
 
-            foreach (var path in possiblePaths)
+            // First, check PATH environment variable for python and python3 (most reliable)
+            foreach (var pythonCommand in new[] { "python", "python3", "python.exe", "python3.exe" })
             {
-                if (File.Exists(path))
+                if (TryFindPythonInPath(pythonCommand))
                 {
-                    _logMessage($"Python実行ファイル発見: {path}");
-                    return path;
+                    return pythonCommand;
                 }
             }
 
-            // PATH環境変数からpythonコマンドを検索
-            try
+            // Windows-specific: Check common installation paths
+            if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.Windows))
             {
-                var startInfo = new ProcessStartInfo
+                var possiblePaths = new List<string>
                 {
-                    FileName = "python",
-                    Arguments = "--version",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
+                    @"C:\Python39\python.exe",
+                    @"C:\Python310\python.exe",
+                    @"C:\Python311\python.exe",
+                    @"C:\Python312\python.exe",
+                    @"C:\Python313\python.exe",
+                    @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python39\python.exe",
+                    @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python310\python.exe",
+                    @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python311\python.exe",
+                    @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python312\python.exe",
+                    @"C:\Users\" + Environment.UserName + @"\AppData\Local\Programs\Python\Python313\python.exe"
                 };
 
-                using var process = Process.Start(startInfo);
-                if (process != null)
+                foreach (var path in possiblePaths)
                 {
-                    process.WaitForExit(5000);
-                    if (process.ExitCode == 0)
+                    if (File.Exists(path))
                     {
-                        var output = process.StandardOutput.ReadToEnd();
-                        _logMessage($"PATHからPython発見: {output.Trim()}");
-                        return "python";
+                        _logMessage($"Python executable found: {path}");
+                        return path;
                     }
                 }
-            }
-            catch (Exception ex)
-            {
-                _logMessage($"PATHからのPython検索に失敗: {ex.Message}");
-            }
-
-            // python3コマンドも試行
-            try
-            {
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = "python3",
-                    Arguments = "--version",
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true
-                };
-
-                using var process = Process.Start(startInfo);
-                if (process != null)
-                {
-                    process.WaitForExit(5000);
-                    if (process.ExitCode == 0)
-                    {
-                        var output = process.StandardOutput.ReadToEnd();
-                        _logMessage($"PATHからPython3発見: {output.Trim()}");
-                        return "python3";
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logMessage($"PATHからのPython3検索に失敗: {ex.Message}");
             }
 
             _logMessage("Python実行ファイルが見つかりませんでした");
@@ -167,7 +120,49 @@ public class PythonEnvironmentManager
     }
 
     /// <summary>
-    /// Pythonが利用可能かどうかを取得するのだ
+    /// Try to find Python in PATH environment variable
+    /// </summary>
+    /// <param name="pythonCommand">Python command name (python or python3)</param>
+    /// <returns>True if found and accessible</returns>
+    private bool TryFindPythonInPath(string pythonCommand)
+    {
+        try
+        {
+            var startInfo = new ProcessStartInfo
+            {
+                FileName = pythonCommand,
+                Arguments = "--version",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var process = Process.Start(startInfo);
+            if (process == null)
+            {
+                return false;
+            }
+
+            process.WaitForExit(TimeoutSettings.PythonVersionCheckTimeoutMs);
+            if (process.ExitCode == 0)
+            {
+                var output = process.StandardOutput.ReadToEnd();
+                _logMessage($"Found Python in PATH: {output.Trim()}");
+                return true;
+            }
+
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logMessage($"Failed to find {pythonCommand} in PATH: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Check if Python is available
     /// </summary>
     public bool IsPythonAvailable => _pythonAvailable;
 

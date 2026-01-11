@@ -9,22 +9,26 @@ def log_message(message):
 try:
     log_message('Pythonスクリプト開始')
     
-    # アプリケーションディレクトリを取得
-    app_dir = os.path.dirname(os.path.abspath('__file__'))
-    log_message('アプリケーションディレクトリ: ' + app_dir)
+    # Get application directory
+    app_dir = os.path.dirname(os.path.abspath(__file__))
+    log_message('Application directory: ' + app_dir)
 
     def convert_files(file_paths, folder_paths):
         results = []
-        
-        log_message(f'convert_files開始: ファイル {len(file_paths)}個, フォルダ {len(folder_paths)}個')
-        
+
+        log_message(f'Start convert_files: {len(file_paths)} files, {len(folder_paths)} folders')
+
         try:
-            # MarkItDownライブラリをインポート
-            log_message('MarkItDownライブラリをインポート中...')
+            # Import MarkItDown library once at the beginning
+            log_message('Importing MarkItDown library...')
             import markitdown
-            log_message('MarkItDownライブラリを正常にインポートしました')
-            
-            # ファイルの変換処理
+            log_message('MarkItDown library imported successfully')
+
+            # Create a single MarkItDown instance to reuse
+            md = markitdown.MarkItDown()
+            log_message('MarkItDown instance created')
+
+            # Process files
             for file_path in file_paths:
                 log_message(f'ファイル処理開始: {file_path}')
                 if os.path.exists(file_path):
@@ -38,9 +42,8 @@ try:
                         log_message(f'ディレクトリ: {file_dir}')
                         log_message(f'拡張子なし名: {name_without_ext}')
                         
-                        # MarkItDownでファイルを変換（直接ファイルを渡す）
-                        log_message('MarkItDownでファイルを変換中...')
-                        md = markitdown.MarkItDown()
+                        # Convert file using MarkItDown (reuse instance)
+                        log_message('Converting file with MarkItDown...')
                         result = md.convert(file_path)
                         markdown_content = result.text_content
                         log_message(f'変換完了、コンテンツ長: {len(markdown_content)}文字')
@@ -100,10 +103,9 @@ try:
                                 log_message(f'フォルダ内ファイル: {file} (拡張子: {file_ext})')
                                 
                                 if file_ext in supported_extensions:
-                                    log_message(f'サポートされているファイル形式: {file}')
-                                    # MarkItDownでファイルを変換
+                                    log_message(f'Supported file format: {file}')
+                                    # Convert file using MarkItDown (reuse instance)
                                     try:
-                                        md = markitdown.MarkItDown()
                                         result = md.convert(file_path)
                                         markdown_content = result.text_content
                                         

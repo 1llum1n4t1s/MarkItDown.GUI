@@ -8,7 +8,7 @@ using MarkItDownX.Services;
 namespace MarkItDownX;
 
     /// <summary>
-/// MainWindow.xaml の相互作用ロジックなのだ
+/// Interaction logic for MainWindow.xaml
     /// </summary>
     public partial class MainWindow : Window
     {
@@ -25,7 +25,7 @@ namespace MarkItDownX;
     }
 
     /// <summary>
-    /// 各マネージャークラスを初期化するのだ
+    /// Initialize manager classes
     /// </summary>
     private void InitializeManagers()
     {
@@ -46,7 +46,7 @@ namespace MarkItDownX;
     }
 
     /// <summary>
-    /// ドロップゾーンの初期化を行うのだ
+    /// Initialize drop zone
         /// </summary>
         private void InitializeDropZone()
         {
@@ -59,10 +59,10 @@ namespace MarkItDownX;
         }
 
         /// <summary>
-    /// ドラッグオーバーイベントハンドラーなのだ
+    /// Drag over event handler
         /// </summary>
-    /// <param name="sender">イベントソースなのだ</param>
-    /// <param name="e">ドラッグイベント引数なのだ</param>
+    /// <param name="sender">Event source</param>
+    /// <param name="e">Drag event arguments</param>
     private void DropZone_DragOver(object sender, System.Windows.DragEventArgs e)
         {
         if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
@@ -77,40 +77,40 @@ namespace MarkItDownX;
         }
 
         /// <summary>
-    /// ドラッグエンターイベントハンドラーなのだ
+    /// Drag enter event handler
         /// </summary>
-    /// <param name="sender">イベントソースなのだ</param>
-    /// <param name="e">ドラッグイベント引数なのだ</param>
+    /// <param name="sender">Event source</param>
+    /// <param name="e">Drag event arguments</param>
     private void DropZone_DragEnter(object sender, System.Windows.DragEventArgs e)
         {
         if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
             {
-            DropZone.Background = new SolidColorBrush(Colors.LightBlue);
+            DropZone.Background = (SolidColorBrush)FindResource("DragOverBrush");
             }
             e.Handled = true;
         }
 
         /// <summary>
-    /// ドラッグリーブイベントハンドラーなのだ
+    /// Drag leave event handler
         /// </summary>
-    /// <param name="sender">イベントソースなのだ</param>
-    /// <param name="e">ドラッグイベント引数なのだ</param>
+    /// <param name="sender">Event source</param>
+    /// <param name="e">Drag event arguments</param>
     private void DropZone_DragLeave(object sender, System.Windows.DragEventArgs e)
         {
-        DropZone.Background = new SolidColorBrush(Colors.LightGray);
+        DropZone.Background = (SolidColorBrush)FindResource("DefaultDropZoneBrush");
             e.Handled = true;
         }
 
         /// <summary>
-    /// ドロップイベントハンドラーなのだ
+    /// Drop event handler
         /// </summary>
-    /// <param name="sender">イベントソースなのだ</param>
-    /// <param name="e">ドラッグイベント引数なのだ</param>
+    /// <param name="sender">Event source</param>
+    /// <param name="e">Drag event arguments</param>
     private async void DropZone_Drop(object sender, System.Windows.DragEventArgs e)
     {
-        if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop))
+        if (e.Data.GetDataPresent(System.Windows.DataFormats.FileDrop) &&
+            e.Data.GetData(System.Windows.DataFormats.FileDrop) is string[] paths)
         {
-            var paths = (string[])e.Data.GetData(System.Windows.DataFormats.FileDrop);
             if (_fileProcessor != null)
             {
                 // プログレスバーを表示
@@ -127,45 +127,45 @@ namespace MarkItDownX;
                 }
             }
         }
-            
-        DropZone.Background = new SolidColorBrush(Colors.LightGray);
+
+        DropZone.Background = (SolidColorBrush)FindResource("DefaultDropZoneBrush");
             e.Handled = true;
         }
 
         /// <summary>
-    /// プログレスバーを表示するのだ
-        /// </summary>
-    /// <param name="message">表示するメッセージなのだ</param>
+    /// Show progress bar
+    /// </summary>
+    /// <param name="message">Message to display</param>
         private void ShowProgress(string message)
         {
             Dispatcher.Invoke(() =>
             {
                 ProgressText.Text = message;
                 ProgressGrid.Visibility = Visibility.Visible;
-                
-                // ドロップゾーンの背景を変更して処理中であることを示す
-                DropZone.Background = new SolidColorBrush(Colors.LightYellow);
+
+                // Change drop zone background to indicate processing
+                DropZone.Background = (SolidColorBrush)FindResource("ProcessingBrush");
             });
         }
 
     /// <summary>
-    /// プログレスバーを非表示にするのだ
+    /// Hide progress bar
     /// </summary>
         private void HideProgress()
         {
             Dispatcher.Invoke(() =>
             {
                 ProgressGrid.Visibility = Visibility.Collapsed;
-                
-                // ドロップゾーンの背景を元に戻す
-                DropZone.Background = new SolidColorBrush(Colors.LightGray);
+
+                // Restore drop zone background
+                DropZone.Background = (SolidColorBrush)FindResource("DefaultDropZoneBrush");
             });
     }
 
         /// <summary>
-    /// ログを画面に表示するのだ
+    /// Display log message on screen
         /// </summary>
-    /// <param name="message">表示するメッセージなのだ</param>
+    /// <param name="message">Message to display</param>
         private void LogMessage(string message)
         {
             try
@@ -181,10 +181,10 @@ namespace MarkItDownX;
                     LogTextBox.ScrollToEnd();
                 });
             }
-            catch
+            catch (Exception ex)
             {
-                // UIスレッドでエラーが発生した場合はコンソールに出力
-                Console.WriteLine(message);
+                // Log error if UI thread operation fails
+                System.Diagnostics.Debug.WriteLine($"Failed to log message: {ex.Message}");
         }
     }
 }

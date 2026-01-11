@@ -6,6 +6,15 @@
         xmlns:local="clr-namespace:MarkItDownX"
         mc:Ignorable="d"
         Title="MarkItDownX" Height="250" Width="300">
+    <Window.Resources>
+        <Color x:Key="DragOverColor">#ADD8E6</Color>
+        <Color x:Key="DefaultDropZoneColor">#D3D3D3</Color>
+        <Color x:Key="ProcessingColor">#FFFFE0</Color>
+        <SolidColorBrush x:Key="DragOverBrush" Color="{StaticResource DragOverColor}"/>
+        <SolidColorBrush x:Key="DefaultDropZoneBrush" Color="{StaticResource DefaultDropZoneColor}"/>
+        <SolidColorBrush x:Key="ProcessingBrush" Color="{StaticResource ProcessingColor}"/>
+    </Window.Resources>
+
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
