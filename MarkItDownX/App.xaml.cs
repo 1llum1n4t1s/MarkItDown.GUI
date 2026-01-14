@@ -1,4 +1,5 @@
-﻿using System.Windows;
+using System;
+using System.Windows;
 using MarkItDownX.Services;
 using Velopack;
 
@@ -15,13 +16,20 @@ public partial class App : Application
         AppSettings.LoadSettings();
         var updateFeedUrl = AppSettings.GetUpdateFeedUrl();
 
-        var updateManager = new UpdateManager(updateFeedUrl);
-        var updateInfo = await updateManager.CheckForUpdatesAsync();
-        if (updateInfo is not null)
+        try
         {
-            await updateManager.DownloadUpdatesAsync(updateInfo);
-            updateManager.ApplyUpdatesAndRestart(updateInfo);
-            return;
+            var updateManager = new UpdateManager(updateFeedUrl);
+            var updateInfo = await updateManager.CheckForUpdatesAsync();
+            if (updateInfo is not null)
+            {
+                await updateManager.DownloadUpdatesAsync(updateInfo);
+                updateManager.ApplyUpdatesAndRestart(updateInfo);
+                return;
+            }
+        }
+        catch (Exception)
+        {
+            // Update check failed, skipping...
         }
 
         base.OnStartup(e);
