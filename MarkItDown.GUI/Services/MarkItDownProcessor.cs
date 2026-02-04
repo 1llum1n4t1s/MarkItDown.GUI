@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 
-namespace MarkItDownX.Services;
+namespace MarkItDown.GUI.Services;
 
 /// <summary>
 /// Responsible for MarkItDown processing
@@ -12,16 +12,19 @@ public class MarkItDownProcessor
 {
     private readonly string _pythonExecutablePath;
     private readonly Action<string> _logMessage;
+    private readonly string? _ffmpegBinPath;
 
     /// <summary>
     /// Constructor
     /// </summary>
     /// <param name="pythonExecutablePath">Path to Python executable</param>
     /// <param name="logMessage">Log output function</param>
-    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage)
+    /// <param name="ffmpegBinPath">Path to ffmpeg bin directory (optional)</param>
+    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
+        _ffmpegBinPath = ffmpegBinPath;
     }
 
     /// <summary>
@@ -60,6 +63,13 @@ public class MarkItDownProcessor
                     StandardOutputEncoding = Encoding.UTF8,
                     StandardErrorEncoding = Encoding.UTF8
                 };
+
+                if (!string.IsNullOrEmpty(_ffmpegBinPath))
+                {
+                    var currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+                    startInfo.Environment["PATH"] = $"{_ffmpegBinPath};{currentPath}";
+                    _logMessage($"ffmpeg PATH設定: {_ffmpegBinPath}");
+                }
 
                 // Use argument list for secure command execution (prevents command injection)
                 startInfo.ArgumentList.Add(scriptPath);
@@ -167,6 +177,12 @@ public class MarkItDownProcessor
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
+
+            if (!string.IsNullOrEmpty(_ffmpegBinPath))
+            {
+                var currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
+                startInfo.Environment["PATH"] = $"{_ffmpegBinPath};{currentPath}";
+            }
 
             // Use argument list for secure command execution (prevents command injection)
             startInfo.ArgumentList.Add(scriptPath);

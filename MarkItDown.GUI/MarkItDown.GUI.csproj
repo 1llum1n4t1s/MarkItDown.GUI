@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows8.0</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <LangVersion>14</LangVersion>
+    <Nullable>enable</Nullable>
+    <Version>1.0.2</Version>
+    <Authors>ゆろち</Authors>
+    <Title>MarkItDown.GUI</Title>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>true</SelfContained>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ActiproSoftware.Controls.Avalonia" Version="25.2.2" />
+    <PackageReference Include="Avalonia" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
+    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.36" />
+    <PackageReference Include="7z.Libs" Version="25.1.0" />
+    <PackageReference Include="Velopack" Version="0.0.*" />
+    <PackageReference Include="ZLogger" Version="2.5.10" />
+  </ItemGroup>
+
+  <!-- Scriptsフォルダを出力ディレクトリにコピー -->
+  <ItemGroup>
+    <Content Include="Scripts\**\*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- ビルド後に7z.dllをルートに配置 -->
+  <Target Name="MoveNativeDllsToRoot" AfterTargets="Build">
+    <!-- 7z.dllを複数の場所から確認して移動 -->
+    <Move SourceFiles="$(OutputPath)x64\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)x64\7z.dll')" ContinueOnError="true" />
+    <Move SourceFiles="$(OutputPath)runtimes\win-x64\native\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)runtimes\win-x64\native\7z.dll')" ContinueOnError="true" />
+    
+    <!-- クリーンアップ -->
+    <RemoveDir Directories="$(OutputPath)x64" Condition="Exists('$(OutputPath)x64')" ContinueOnError="true" />
+    <RemoveDir Directories="$(OutputPath)x86" Condition="Exists('$(OutputPath)x86')" ContinueOnError="true" />
+    
+    <!-- 成功したかログ出力 -->
+    <Message Text="7z.dll is at: $(OutputPath)7z.dll" Importance="high" Condition="Exists('$(OutputPath)7z.dll')" />
+    <Warning Text="7z.dll NOT FOUND at $(OutputPath)7z.dll" Condition="!Exists('$(OutputPath)7z.dll')" />
+  </Target>
+
+</Project>

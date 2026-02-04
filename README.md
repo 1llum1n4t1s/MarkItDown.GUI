@@ -1,14 +1,52 @@
-# MarkItDownX
+# MarkItDown.GUI
 
-## 公開手順
+シンプルなドラッグ&ドロップ操作で、様々なファイル形式をMarkdown形式に変換するWindowsアプリケーションです。
 
-1. `releases` ブランチにリリース用の変更をコミットします。
-2. `releases` ブランチへ push すると、GitHub Actions の「Velopack リリース」ワークフローが実行されます。
-3. ワークフローが Velopack でパッケージ（`vpk`）を作成し、GitHub Releases にアップロードします。
+## 特徴
 
-※ `main` ブランチへの push では公開は実行されません。
+- **簡単操作**: ファイルやフォルダをウィンドウにドロップするだけで自動変換
+- **多様なファイル形式に対応**: Office文書、画像、音声、テキストファイルなど幅広く対応
+- **自動環境構築**: Python環境やFFmpegを自動でダウンロード・セットアップ
+- **モダンなUI**: Avalonia UIを使用した軽量で使いやすいインターフェース
 
-## 配布/運用メモ
+## ダウンロード
 
-- 初回インストールは Velopack が生成する `Setup.exe` を配布します。
-- GitHub Releases には `artifacts/releases` フォルダに生成されたファイル一式をアップロードします（`Setup.exe` を含む一式）。
+最新版は以下のGitHub Releasesページからダウンロードできます。
+
+**[📥 ダウンロードページ（GitHub Releases）](https://github.com/1llum1n4t1s/MarkItDown.GUI/releases)**
+
+`Setup.exe` をダウンロードして実行してください。
+
+## サポートしているファイル形式
+
+### テキスト・文書ファイル
+- `.txt`, `.md`, `.html`, `.htm`, `.csv`, `.json`, `.xml`
+
+### Office文書
+- `.docx`, `.doc`, `.xlsx`, `.xls`, `.pptx`, `.ppt`
+
+### 画像ファイル
+- `.jpg`, `.jpeg`, `.png`, `.gif`, `.bmp`, `.tiff`, `.tif`
+
+### 音声ファイル
+- `.mp3`, `.wav`, `.flac`, `.aac`, `.ogg`
+
+### アーカイブファイル
+- `.zip`, `.rar`, `.7z`, `.tar`, `.gz`
+
+## 使い方
+
+1. アプリケーションを起動します
+2. 変換したいファイルまたはフォルダをウィンドウにドラッグ&ドロップします
+3. 自動的に変換が開始され、元のファイルと同じ場所にMarkdownファイル（`.md`）が生成されます
+
+変換されたファイルは `ファイル名_タイムスタンプ.md` という形式で保存されます。
+
+## 動作環境
+
+- Windows 11 (ビルド 26200以降)
+- .NET 10.0 Runtime（インストーラーに含まれています）
+
+## ライセンス
+
+このプロジェクトはMITライセンスの下で公開されています。詳細は [LICENSE](LICENSE) ファイルをご覧ください。

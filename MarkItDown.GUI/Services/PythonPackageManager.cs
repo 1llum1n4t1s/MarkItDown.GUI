@@ -3,7 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Text;
 
-namespace MarkItDownX.Services;
+namespace MarkItDown.GUI.Services;
 
 /// <summary>
 /// Responsible for managing Python packages
@@ -25,17 +25,13 @@ public class PythonPackageManager
     }
 
     /// <summary>
-    /// Automatically install MarkItDown and FFmpeg using pip
+    /// Automatically install MarkItDown package using pip
     /// </summary>
     public void InstallMarkItDownPackage()
     {
         try
         {
-            // markitdownパッケージの状態をチェックして統一するのだ
             CheckAndUnifyMarkItDownInstallation();
-            
-            // ffmpegのインストールを試行するのだ
-            InstallFfmpegWithWinget();
         }
         catch (Exception ex)
         {
@@ -189,143 +185,4 @@ public class PythonPackageManager
         }
     }
     
-    /// <summary>
-    /// ffmpegをインストールするのだ
-    /// </summary>
-    private void InstallFfmpegWithWinget()
-    {
-        try
-        {
-            _logMessage("ffmpegのインストールを試行中...");
-            
-            // ffmpegが既にインストールされているかチェック
-            _logMessage("ffmpegのインストール状況をチェック中...");
-            var checkFfmpegInfo = new ProcessStartInfo
-            {
-                FileName = "ffmpeg",
-                Arguments = "-version",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            
-            try
-            {
-                using var checkFfmpegProc = Process.Start(checkFfmpegInfo);
-                if (checkFfmpegProc != null)
-                {
-                    string output = checkFfmpegProc.StandardOutput.ReadToEnd();
-                    string error = checkFfmpegProc.StandardError.ReadToEnd();
-                    checkFfmpegProc.WaitForExit(TimeoutSettings.FFmpegCheckTimeoutMs);
-                    
-                    if (checkFfmpegProc.ExitCode == 0)
-                    {
-                        _logMessage($"ffmpegは既にインストール済みなのだ: {output.Trim()}");
-                        return;
-                    }
-                    else
-                    {
-                        _logMessage($"ffmpegチェックでエラー: {error}");
-                    }
-                }
-                else
-                {
-                    _logMessage("ffmpegプロセスの開始に失敗したのだ");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logMessage($"ffmpegが見つからないため、インストールを続行するのだ: {ex.Message}");
-            }
-            
-            // wingetでffmpegがインストールされているかチェック
-            _logMessage("wingetでffmpegのインストール状況をチェック中...");
-            var checkWingetInfo = new ProcessStartInfo
-            {
-                FileName = "winget",
-                Arguments = "list Gyan.FFmpeg",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            
-            try
-            {
-                using var checkWingetProc = Process.Start(checkWingetInfo);
-                if (checkWingetProc != null)
-                {
-                    string output = checkWingetProc.StandardOutput.ReadToEnd();
-                    string error = checkWingetProc.StandardError.ReadToEnd();
-                    checkWingetProc.WaitForExit(TimeoutSettings.FFmpegCheckTimeoutMs);
-                    
-                    if (checkWingetProc.ExitCode == 0 && output.Contains("Gyan.FFmpeg"))
-                    {
-                        _logMessage("wingetでffmpegがインストール済みだが、PATHに追加されていないのだ");
-                        _logMessage("ffmpegをPATHに追加するか、再起動が必要なのだ");
-                        return;
-                    }
-                    else
-                    {
-                        _logMessage("wingetでffmpegがインストールされていないのだ");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logMessage($"wingetチェックでエラー: {ex.Message}");
-            }
-            
-            // wingetを使用してffmpegをインストール
-            _logMessage("wingetを使用してffmpegをインストール中...");
-            var wingetInfo = new ProcessStartInfo
-            {
-                FileName = "winget",
-                Arguments = "install Gyan.FFmpeg",
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true
-            };
-            
-            try
-            {
-                using var wingetProc = Process.Start(wingetInfo);
-                if (wingetProc != null)
-                {
-                    string output = wingetProc.StandardOutput.ReadToEnd();
-                    string error = wingetProc.StandardError.ReadToEnd();
-                    wingetProc.WaitForExit(TimeoutSettings.FFmpegInstallTimeoutMs);
-                    _logMessage($"winget出力: {output}");
-                    if (!string.IsNullOrEmpty(error))
-                        _logMessage($"wingetエラー: {error}");
-                    
-                    if (wingetProc.ExitCode == 0)
-                    {
-                        _logMessage("ffmpegのインストールが完了したのだ");
-                    }
-                    else
-                    {
-                        _logMessage("wingetでのffmpegインストールに失敗したのだ");
-                    }
-                }
-                else
-                {
-                    _logMessage("wingetが見つからないため、ffmpegのインストールをスキップするのだ");
-                }
-            }
-            catch (Exception ex)
-            {
-                _logMessage($"wingetでエラー: {ex.Message}");
-                _logMessage("ffmpegのインストールに失敗したが、MarkItDownは動作するのだ");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logMessage($"ffmpegインストール処理でエラー: {ex.Message}");
-        }
-    }
-    
-
 } 

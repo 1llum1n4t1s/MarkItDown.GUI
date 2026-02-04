@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import traceback
+from datetime import datetime
 
 def log_message(message):
     print(message, flush=True)
@@ -48,15 +49,17 @@ try:
                         markdown_content = result.text_content
                         log_message(f'変換完了、コンテンツ長: {len(markdown_content)}文字')
                         
-                        # 同じディレクトリにMarkdownファイルとして出力
-                        output_path = os.path.join(file_dir, name_without_ext + '.md')
+                        # タイムスタンプを生成
+                        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
+                        output_filename = f'{name_without_ext}_{timestamp}.md'
+                        output_path = os.path.join(file_dir, output_filename)
                         log_message(f'出力パス: {output_path}')
                         
                         with open(output_path, 'w', encoding='utf-8') as f:
                             f.write(markdown_content)
                         
                         log_message(f'ファイル出力完了: {output_path}')
-                        results.append(f'変換完了: {file_name} → {name_without_ext}.md')
+                        results.append(f'変換完了: {file_name} → {output_filename}')
                         log_message(f'ファイルを変換しました: {file_path} → {output_path}')
                         
                     except Exception as e:
@@ -109,15 +112,17 @@ try:
                                         result = md.convert(file_path)
                                         markdown_content = result.text_content
                                         
-                                        # 同じディレクトリにMarkdownファイルとして出力
+                                        # タイムスタンプを生成
+                                        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
                                         name_without_ext = os.path.splitext(file)[0]
-                                        output_path = os.path.join(root, name_without_ext + '.md')
+                                        output_filename = f'{name_without_ext}_{timestamp}.md'
+                                        output_path = os.path.join(root, output_filename)
                                         
                                         with open(output_path, 'w', encoding='utf-8') as f:
                                             f.write(markdown_content)
                                         
                                         converted_count += 1
-                                        log_message(f'フォルダ内ファイルを変換: {file} → {name_without_ext}.md')
+                                        log_message(f'フォルダ内ファイルを変換: {file} → {output_filename}')
                                     except Exception as e:
                                         log_message(f'フォルダ内ファイル変換エラー: {file} - {str(e)}')
                                 else:

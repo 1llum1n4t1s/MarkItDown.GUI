@@ -1,4 +1,4 @@
-namespace MarkItDownX.Services;
+namespace MarkItDown.GUI.Services;
 
 /// <summary>
 /// Centralized timeout configuration for all process operations

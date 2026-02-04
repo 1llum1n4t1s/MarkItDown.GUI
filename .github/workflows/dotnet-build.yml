@@ -11,7 +11,7 @@ on:
 jobs:
   build:
     name: .NET ビルド
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
 
     steps:
       - name: リポジトリをチェックアウト
@@ -20,10 +20,10 @@ jobs:
       - name: .NET SDK をセットアップ
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "9.0.x"
+          dotnet-version: "10.0.x"
 
       - name: 依存関係を復元
-        run: dotnet restore "**/*.sln"
+        run: dotnet restore MarkItDown.GUI.slnx
 
       - name: ビルド
-        run: dotnet build "**/*.sln" --configuration Release --no-restore
+        run: dotnet build MarkItDown.GUI.slnx --configuration Release --no-restore

@@ -2,10 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Text.Json;
 using System.Threading.Tasks;
-using Newtonsoft.Json;
 
-namespace MarkItDownX.Services;
+namespace MarkItDown.GUI.Services;
 
 /// <summary>
 /// Responsible for file processing
@@ -144,8 +144,8 @@ public class FileProcessor
             _logMessage($"C#側アプリケーションディレクトリ: {appDir}");
                 
             // ファイルとフォルダのパスを設定
-            var filePathsJson = JsonConvert.SerializeObject(files);
-            var folderPathsJson = JsonConvert.SerializeObject(folders);
+            var filePathsJson = JsonSerializer.Serialize(files);
+            var folderPathsJson = JsonSerializer.Serialize(folders);
                 
             _logMessage($"ファイルパスJSON: {filePathsJson}");
             _logMessage($"フォルダパスJSON: {folderPathsJson}");

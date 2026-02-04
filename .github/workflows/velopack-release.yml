@@ -20,13 +20,13 @@ jobs:
       - name: .NET SDK をセットアップ
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          dotnet-version: "10.0.x"
 
       - name: 依存関係を復元
-        run: dotnet restore MarkItDownX/MarkItDownX.csproj
+        run: dotnet restore MarkItDown.GUI/MarkItDown.GUI.csproj
 
       - name: アプリを発行
-        run: dotnet publish MarkItDownX/MarkItDownX.csproj -c Release -o artifacts/publish
+        run: dotnet publish MarkItDown.GUI/MarkItDown.GUI.csproj -c Release -o artifacts/publish -r win-x64
 
       - name: Velopack CLI をインストール
         run: dotnet tool install --global vpk
@@ -34,10 +34,10 @@ jobs:
       - name: Velopack パッケージを作成
         run: |
           vpk pack \
-            --packId MarkItDownX \
+            --packId MarkItDown.GUI \
             --packVersion $env:VPK_VERSION \
             --packDir artifacts/publish \
-            --mainExe MarkItDownX.exe \
+            --mainExe MarkItDown.GUI.exe \
             --outputDir artifacts/releases
 
       - name: GitHub Releases へアップロード

@@ -2,7 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Text;
 
-namespace MarkItDownX.Services;
+namespace MarkItDown.GUI.Services;
 
 /// <summary>
 /// Utility class for process execution with secure argument handling

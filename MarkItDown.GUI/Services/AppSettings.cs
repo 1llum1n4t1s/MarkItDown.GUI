@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Xml.Linq;
 
-namespace MarkItDownX.Services;
+namespace MarkItDown.GUI.Services;
 
 /// <summary>
 /// Application configuration settings
@@ -58,11 +58,66 @@ public class AppSettings
     }
 
     /// <summary>
+    /// 埋め込みPythonのバージョン文字列を取得する
+    /// </summary>
+    public static string? GetPythonVersion()
+    {
+        try
+        {
+            var version = _settingsDocument?.Root?.Element("PythonVersion")?.Value;
+            return string.IsNullOrWhiteSpace(version) ? null : version.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// 埋め込みPythonのバージョン文字列を保存する
+    /// </summary>
+    /// <param name="version">バージョン文字列（例: 3.12.0）</param>
+    public static void SetPythonVersion(string? version)
+    {
+        try
+        {
+            var root = _settingsDocument?.Root;
+            if (root is null)
+            {
+                return;
+            }
+
+            var element = root.Element("PythonVersion");
+            if (string.IsNullOrEmpty(version))
+            {
+                element?.Remove();
+            }
+            else
+            {
+                if (element is null)
+                {
+                    root.Add(new XElement("PythonVersion", version));
+                }
+                else
+                {
+                    element.Value = version;
+                }
+            }
+
+            _settingsDocument?.Save(SettingsPath);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to save PythonVersion: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Get the default update feed URL (GitHub releases)
     /// </summary>
     private static string GetDefaultUpdateFeedUrl()
     {
-        return "https://github.com/1llum1n4t1s/MarkItDownX/releases/latest/download";
+        return "https://github.com/1llum1n4t1s/MarkItDown.GUI/releases/latest/download";
     }
 
     /// <summary>
@@ -73,7 +128,8 @@ public class AppSettings
         try
         {
             var root = new XElement("AppSettings",
-                new XElement("UpdateFeedUrl", GetDefaultUpdateFeedUrl())
+                new XElement("UpdateFeedUrl", GetDefaultUpdateFeedUrl()),
+                new XElement("PythonVersion", "")
             );
 
             _settingsDocument = new XDocument(root);
