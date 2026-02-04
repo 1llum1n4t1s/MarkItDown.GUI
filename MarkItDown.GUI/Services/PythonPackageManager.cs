@@ -32,10 +32,114 @@ public class PythonPackageManager
         try
         {
             CheckAndUnifyMarkItDownInstallation();
+            CheckAndInstallRequestsPackage();
         }
         catch (Exception ex)
         {
             _logMessage($"パッケージインストールでエラー: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// requestsパッケージの状態をチェックしてインストールする
+    /// </summary>
+    private void CheckAndInstallRequestsPackage()
+    {
+        try
+        {
+            if (!CheckPackageInstalled("requests"))
+            {
+                _logMessage("requestsパッケージが不足しているのでpipでインストールするのだ");
+                InstallPackageWithPip("requests");
+                return;
+            }
+
+            _logMessage("requestsパッケージはインストール済みなのだ");
+        }
+        catch (Exception ex)
+        {
+            _logMessage($"requests確認処理でエラー: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// パッケージがインストールされているかチェックする
+    /// </summary>
+    /// <param name="packageName">パッケージ名</param>
+    /// <returns>インストールされているかどうか</returns>
+    private bool CheckPackageInstalled(string packageName)
+    {
+        try
+        {
+            var checkInfo = new ProcessStartInfo
+            {
+                FileName = _pythonExecutablePath,
+                Arguments = $"-c \"import {packageName}\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var checkProc = Process.Start(checkInfo);
+            if (checkProc != null)
+            {
+                checkProc.WaitForExit(TimeoutSettings.PythonVersionCheckTimeoutMs);
+                return checkProc.ExitCode == 0;
+            }
+            return false;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to check {packageName} installation: {ex.Message}");
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// pipでパッケージをインストールする
+    /// </summary>
+    /// <param name="packageName">パッケージ名</param>
+    private void InstallPackageWithPip(string packageName)
+    {
+        try
+        {
+            _logMessage($"pipで{packageName}をインストール中...");
+            var installInfo = new ProcessStartInfo
+            {
+                FileName = _pythonExecutablePath,
+                Arguments = $"-m pip install {packageName}",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true
+            };
+
+            using var installProc = Process.Start(installInfo);
+            if (installProc != null)
+            {
+                var output = installProc.StandardOutput.ReadToEnd();
+                var error = installProc.StandardError.ReadToEnd();
+                installProc.WaitForExit(TimeoutSettings.PackageInstallTimeoutMs);
+                _logMessage($"pip出力: {output}");
+                if (!string.IsNullOrEmpty(error))
+                {
+                    _logMessage($"pipエラー: {error}");
+                }
+
+                if (installProc.ExitCode == 0)
+                {
+                    _logMessage($"{packageName}のインストールが完了したのだ");
+                }
+                else
+                {
+                    _logMessage($"{packageName}のインストールに失敗したのだ");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logMessage($"{packageName}インストールでエラー: {ex.Message}");
         }
     }
     

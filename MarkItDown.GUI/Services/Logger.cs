@@ -35,9 +35,8 @@ public static class Logger
     {
         get
         {
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory.AsSpan();
-            return baseDir.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase) ||
-                   baseDir.Contains(@"\bin\Release\", StringComparison.OrdinalIgnoreCase);
+            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+            return baseDir.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase);
         }
     }
 
@@ -61,9 +60,16 @@ public static class Logger
         _appName = opt.AppName;
         var logDirectory = opt.LogDirectoryOverride ?? GetLogDirectory(_appName);
 
-        if (!Directory.Exists(logDirectory))
+        try
         {
-            Directory.CreateDirectory(logDirectory);
+            if (!Directory.Exists(logDirectory))
+            {
+                Directory.CreateDirectory(logDirectory);
+            }
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"ログディレクトリの作成に失敗しました: {ex.Message}");
         }
 
         _loggerFactory = LoggerFactory.Create(logging =>
@@ -100,7 +106,7 @@ public static class Logger
         });
 
         _logger = _loggerFactory.CreateLogger(_appName);
-        _logger.LogDebug("Logger initialized (RollingFile)");
+        _logger.LogInformation($"Logger initialized - Log directory: {logDirectory}");
     }
 
     public static void Log(string message, LogLevel level = LogLevel.Info)

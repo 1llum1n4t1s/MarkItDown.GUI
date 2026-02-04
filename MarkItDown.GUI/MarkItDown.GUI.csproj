@@ -35,6 +35,15 @@
     </Content>
   </ItemGroup>
 
+  <!-- ビルド前にアイコンを生成 -->
+  <Target Name="GenerateIcon" BeforeTargets="BeforeBuild">
+    <Message Text="アイコン生成スクリプトを実行中..." Importance="high" />
+    <Exec Command="pwsh -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\icon\generate_icon.ps1&quot;" 
+          ContinueOnError="true"
+          IgnoreExitCode="false"
+          WorkingDirectory="$(MSBuildProjectDirectory)\..\icon" />
+  </Target>
+
   <!-- ビルド後に7z.dllをルートに配置 -->
   <Target Name="MoveNativeDllsToRoot" AfterTargets="Build">
     <!-- 7z.dllを複数の場所から確認して移動 -->

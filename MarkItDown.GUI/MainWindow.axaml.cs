@@ -18,12 +18,23 @@ public partial class MainWindow : Avalonia.Controls.Window
         InitializeComponent();
         DataContext = new MainWindowViewModel();
         InitializeDropZone();
+        Closed += MainWindow_Closed;
     }
 
     /// <summary>
     /// ViewModel を取得する（null でない前提）
     /// </summary>
     private MainWindowViewModel ViewModel => (MainWindowViewModel)DataContext!;
+
+    /// <summary>
+    /// ウィンドウが閉じられたときのハンドラー
+    /// </summary>
+    /// <param name="sender">イベントソース</param>
+    /// <param name="e">イベント引数</param>
+    private void MainWindow_Closed(object? sender, EventArgs e)
+    {
+        ViewModel.Dispose();
+    }
 
     /// <summary>
     /// ドロップゾーンのイベントハンドラーを設定する

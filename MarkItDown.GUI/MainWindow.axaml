@@ -77,7 +77,30 @@
                                TextWrapping="Wrap"
                                MaxWidth="380"/>
                     
+                    <!-- ダウンロード進捗表示 -->
+                    <StackPanel IsVisible="{Binding IsDownloading}"
+                                Spacing="10">
+                        <TextBlock HorizontalAlignment="Center"
+                                   Foreground="#4A9EFF"
+                                   FontSize="16"
+                                   FontWeight="SemiBold">
+                            <TextBlock.Text>
+                                <MultiBinding StringFormat="{}{0:F1}%">
+                                    <Binding Path="DownloadProgress"/>
+                                </MultiBinding>
+                            </TextBlock.Text>
+                        </TextBlock>
+                        
+                        <ProgressBar Height="8"
+                                     Value="{Binding DownloadProgress}"
+                                     Maximum="100"
+                                     Foreground="#4A9EFF"
+                                     Background="#3A3A3A"/>
+                    </StackPanel>
+                    
+                    <!-- 不確定プログレスバー（ダウンロード中以外） -->
                     <ProgressBar Height="8"
+                                 IsVisible="{Binding !IsDownloading}"
                                  IsIndeterminate="True"
                                  Foreground="#4A9EFF"
                                  Background="#3A3A3A"

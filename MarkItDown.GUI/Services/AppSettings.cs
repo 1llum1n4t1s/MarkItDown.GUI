@@ -113,6 +113,116 @@ public class AppSettings
     }
 
     /// <summary>
+    /// OllamaのエンドポイントURLを取得する
+    /// </summary>
+    public static string? GetOllamaUrl()
+    {
+        try
+        {
+            var url = _settingsDocument?.Root?.Element("OllamaUrl")?.Value;
+            return string.IsNullOrWhiteSpace(url) ? null : url.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// OllamaのエンドポイントURLを保存する
+    /// </summary>
+    /// <param name="url">OllamaのURL（例: http://localhost:11434）</param>
+    public static void SetOllamaUrl(string? url)
+    {
+        try
+        {
+            var root = _settingsDocument?.Root;
+            if (root is null)
+            {
+                return;
+            }
+
+            var element = root.Element("OllamaUrl");
+            if (string.IsNullOrEmpty(url))
+            {
+                element?.Remove();
+            }
+            else
+            {
+                if (element is null)
+                {
+                    root.Add(new XElement("OllamaUrl", url));
+                }
+                else
+                {
+                    element.Value = url;
+                }
+            }
+
+            _settingsDocument?.Save(SettingsPath);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to save OllamaUrl: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Ollamaで使用するモデル名を取得する
+    /// </summary>
+    public static string? GetOllamaModel()
+    {
+        try
+        {
+            var model = _settingsDocument?.Root?.Element("OllamaModel")?.Value;
+            return string.IsNullOrWhiteSpace(model) ? null : model.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Ollamaで使用するモデル名を保存する
+    /// </summary>
+    /// <param name="model">モデル名（例: llava）</param>
+    public static void SetOllamaModel(string? model)
+    {
+        try
+        {
+            var root = _settingsDocument?.Root;
+            if (root is null)
+            {
+                return;
+            }
+
+            var element = root.Element("OllamaModel");
+            if (string.IsNullOrEmpty(model))
+            {
+                element?.Remove();
+            }
+            else
+            {
+                if (element is null)
+                {
+                    root.Add(new XElement("OllamaModel", model));
+                }
+                else
+                {
+                    element.Value = model;
+                }
+            }
+
+            _settingsDocument?.Save(SettingsPath);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to save OllamaModel: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Get the default update feed URL (GitHub releases)
     /// </summary>
     private static string GetDefaultUpdateFeedUrl()
@@ -129,7 +239,9 @@ public class AppSettings
         {
             var root = new XElement("AppSettings",
                 new XElement("UpdateFeedUrl", GetDefaultUpdateFeedUrl()),
-                new XElement("PythonVersion", "")
+                new XElement("PythonVersion", ""),
+                new XElement("OllamaUrl", "http://localhost:11434"),
+                new XElement("OllamaModel", "llava")
             );
 
             _settingsDocument = new XDocument(root);

@@ -10,14 +10,17 @@ namespace MarkItDown.GUI.ViewModels;
 /// <summary>
 /// メインウィンドウの ViewModel
 /// </summary>
-public class MainWindowViewModel : ViewModelBase
+public class MainWindowViewModel : ViewModelBase, IDisposable
 {
     private string _logText = "アプリケーションが起動しました...";
     private IBrush _dropZoneBackground;
     private FileProcessor? _fileProcessor;
+    private OllamaManager? _ollamaManager;
     private bool _isProcessing;
     private string _processingTitle = string.Empty;
     private string _processingStatus = string.Empty;
+    private double _downloadProgress;
+    private bool _isDownloading;
 
     private static readonly IBrush DefaultDropZoneBrush = new SolidColorBrush(Color.Parse("#D3D3D3"));
     private static readonly IBrush DragOverBrush = new SolidColorBrush(Color.Parse("#ADD8E6"));
@@ -69,6 +72,24 @@ public class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// ダウンロード進捗率（0～100）
+    /// </summary>
+    public double DownloadProgress
+    {
+        get => _downloadProgress;
+        set => SetProperty(ref _downloadProgress, value);
+    }
+
+    /// <summary>
+    /// ダウンロード中かどうか
+    /// </summary>
+    public bool IsDownloading
+    {
+        get => _isDownloading;
+        set => SetProperty(ref _isDownloading, value);
+    }
+
+    /// <summary>
     /// コンストラクタ
     /// </summary>
     public MainWindowViewModel()
@@ -99,15 +120,21 @@ public class MainWindowViewModel : ViewModelBase
             var ffmpegManager = new FfmpegManager(LogMessage);
             await ffmpegManager.InitializeAsync();
 
+            UpdateProcessingStatus("Ollama環境を確認中...");
+            _ollamaManager = new OllamaManager(LogMessage, UpdateDownloadProgress);
+            await _ollamaManager.InitializeAsync();
+
             var pythonExe = pythonEnvironmentManager.PythonExecutablePath;
             var ffmpegBinPath = ffmpegManager.IsFfmpegAvailable ? ffmpegManager.FfmpegBinPath : null;
+            var ollamaUrl = _ollamaManager.IsOllamaAvailable ? _ollamaManager.OllamaUrl : null;
+            var ollamaModel = _ollamaManager.IsOllamaAvailable ? _ollamaManager.DefaultModel : null;
 
             UpdateProcessingStatus("Pythonパッケージを確認中...");
             var pythonPackageManager = new PythonPackageManager(pythonExe, LogMessage);
             pythonPackageManager.InstallMarkItDownPackage();
 
             UpdateProcessingStatus("MarkItDownライブラリを準備中...");
-            var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath);
+            var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, ollamaUrl, ollamaModel);
             _fileProcessor = new FileProcessor(markItDownProcessor, LogMessage);
 
             UpdateProcessingStatus("初期化完了");
@@ -116,6 +143,7 @@ public class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             LogMessage($"初期化中にエラーが発生しました: {ex.Message}");
+            Logger.LogException("初期化中にエラーが発生しました", ex);
         }
         finally
         {
@@ -132,6 +160,8 @@ public class MainWindowViewModel : ViewModelBase
     {
         try
         {
+            Logger.Log(message, LogLevel.Info);
+            
             Dispatcher.UIThread.Post(() =>
             {
                 var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
@@ -141,6 +171,7 @@ public class MainWindowViewModel : ViewModelBase
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Failed to log message: {ex.Message}");
+            Logger.LogException("ログメッセージの追加に失敗しました", ex);
         }
     }
 
@@ -231,6 +262,19 @@ public class MainWindowViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// ダウンロード進捗を更新する
+    /// </summary>
+    /// <param name="progress">進捗率（0～100）</param>
+    public void UpdateDownloadProgress(double progress)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            DownloadProgress = progress;
+            IsDownloading = progress > 0 && progress < 100;
+        });
+    }
+
+    /// <summary>
     /// 処理中オーバーレイを非表示にする
     /// </summary>
     private void HideProcessing()
@@ -239,5 +283,20 @@ public class MainWindowViewModel : ViewModelBase
         {
             IsProcessing = false;
         });
+    }
+
+    /// <summary>
+    /// リソースを解放する
+    /// </summary>
+    public void Dispose()
+    {
+        try
+        {
+            _ollamaManager?.Dispose();
+        }
+        catch (Exception ex)
+        {
+            LogMessage($"リソース解放中にエラー: {ex.Message}");
+        }
     }
 }

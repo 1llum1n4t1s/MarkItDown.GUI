@@ -13,6 +13,8 @@ public class MarkItDownProcessor
     private readonly string _pythonExecutablePath;
     private readonly Action<string> _logMessage;
     private readonly string? _ffmpegBinPath;
+    private readonly string? _ollamaUrl;
+    private readonly string? _ollamaModel;
 
     /// <summary>
     /// Constructor
@@ -20,11 +22,15 @@ public class MarkItDownProcessor
     /// <param name="pythonExecutablePath">Path to Python executable</param>
     /// <param name="logMessage">Log output function</param>
     /// <param name="ffmpegBinPath">Path to ffmpeg bin directory (optional)</param>
-    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null)
+    /// <param name="ollamaUrl">Ollama endpoint URL (optional)</param>
+    /// <param name="ollamaModel">Ollama model name (optional)</param>
+    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null, string? ollamaUrl = null, string? ollamaModel = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
         _ffmpegBinPath = ffmpegBinPath;
+        _ollamaUrl = ollamaUrl;
+        _ollamaModel = ollamaModel;
     }
 
     /// <summary>
@@ -182,6 +188,18 @@ public class MarkItDownProcessor
             {
                 var currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
                 startInfo.Environment["PATH"] = $"{_ffmpegBinPath};{currentPath}";
+            }
+
+            if (!string.IsNullOrEmpty(_ollamaUrl))
+            {
+                startInfo.Environment["OLLAMA_URL"] = _ollamaUrl;
+                _logMessage($"Ollama URL設定: {_ollamaUrl}");
+            }
+
+            if (!string.IsNullOrEmpty(_ollamaModel))
+            {
+                startInfo.Environment["OLLAMA_MODEL"] = _ollamaModel;
+                _logMessage($"Ollama Model設定: {_ollamaModel}");
             }
 
             // Use argument list for secure command execution (prevents command injection)
