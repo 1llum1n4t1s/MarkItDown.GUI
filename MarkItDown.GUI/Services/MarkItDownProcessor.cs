@@ -210,25 +210,29 @@ public class MarkItDownProcessor
             using var process = Process.Start(startInfo);
             if (process != null)
             {
+                process.OutputDataReceived += (_, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.Data))
+                    {
+                        _logMessage(e.Data);
+                    }
+                };
+                process.ErrorDataReceived += (_, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.Data))
+                    {
+                        _logMessage(e.Data);
+                    }
+                };
+                
+                process.BeginOutputReadLine();
+                process.BeginErrorReadLine();
+                
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                process.WaitForExit(TimeoutSettings.MarkItDownCheckTimeoutMs);
+                process.WaitForExit(TimeoutSettings.FileConversionTimeoutMs);
                 stopwatch.Stop();
 
                 _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
-                    
-                // プロセス終了後に出力を読み取る
-                var output = process.StandardOutput.ReadToEnd();
-                var error = process.StandardError.ReadToEnd();
-                    
-                if (!string.IsNullOrEmpty(output))
-                {
-                    _logMessage($"Python出力:\n{output}");
-                }
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logMessage($"Pythonエラー:\n{error}");
-                }
-                    
                 _logMessage($"Pythonスクリプト実行完了 - 終了コード: {process.ExitCode}");
             }
             else

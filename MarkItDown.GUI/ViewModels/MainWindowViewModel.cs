@@ -107,7 +107,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ShowProcessing("MarkItDown.GUI を初期化中...", "Python環境を初期化中...");
 
-            var pythonEnvironmentManager = new PythonEnvironmentManager(LogMessage);
+            var pythonEnvironmentManager = new PythonEnvironmentManager(LogMessage, UpdatePythonDownloadProgress);
             await pythonEnvironmentManager.InitializeAsync();
 
             if (!pythonEnvironmentManager.IsPythonAvailable)
@@ -117,11 +117,11 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             UpdateProcessingStatus("ffmpeg環境を準備中...");
-            var ffmpegManager = new FfmpegManager(LogMessage);
+            var ffmpegManager = new FfmpegManager(LogMessage, UpdateFfmpegDownloadProgress);
             await ffmpegManager.InitializeAsync();
 
             UpdateProcessingStatus("Ollama環境を確認中...");
-            _ollamaManager = new OllamaManager(LogMessage, UpdateDownloadProgress);
+            _ollamaManager = new OllamaManager(LogMessage, UpdateOllamaDownloadProgress);
             await _ollamaManager.InitializeAsync();
 
             var pythonExe = pythonEnvironmentManager.PythonExecutablePath;
@@ -262,15 +262,92 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// ダウンロード進捗を更新する
+    /// Pythonダウンロード進捗を更新する
     /// </summary>
     /// <param name="progress">進捗率（0～100）</param>
-    public void UpdateDownloadProgress(double progress)
+    private void UpdatePythonDownloadProgress(double progress)
     {
         Dispatcher.UIThread.Post(() =>
         {
             DownloadProgress = progress;
             IsDownloading = progress > 0 && progress < 100;
+            
+            if (progress > 0 && progress < 100)
+            {
+                UpdateProcessingStatus("Pythonダウンロード中...");
+            }
+            else if (progress >= 100)
+            {
+                UpdateProcessingStatus("Python展開中...");
+            }
+        });
+    }
+
+    /// <summary>
+    /// ffmpegダウンロード進捗を更新する
+    /// </summary>
+    /// <param name="progress">進捗率（0～100）</param>
+    private void UpdateFfmpegDownloadProgress(double progress)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            DownloadProgress = progress;
+            IsDownloading = progress > 0 && progress < 100;
+            
+            if (progress > 0 && progress < 100)
+            {
+                UpdateProcessingStatus("ffmpegダウンロード中...");
+            }
+            else if (progress >= 100)
+            {
+                UpdateProcessingStatus("ffmpeg展開中...");
+            }
+        });
+    }
+
+    private bool _isOllamaExtracting;
+    private bool _ollamaDownloadCompleted;
+
+    /// <summary>
+    /// Ollamaダウンロード進捗を更新する
+    /// </summary>
+    /// <param name="progress">進捗率（0～100）</param>
+    private void UpdateOllamaDownloadProgress(double progress)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            DownloadProgress = progress;
+            IsDownloading = progress > 0 && progress < 100;
+            
+            if (progress >= 100 && !_ollamaDownloadCompleted)
+            {
+                _ollamaDownloadCompleted = true;
+                _isOllamaExtracting = true;
+            }
+            
+            if (_isOllamaExtracting)
+            {
+                if (progress == 0)
+                {
+                    UpdateProcessingStatus("Ollamaアーカイブを展開準備中...");
+                }
+                else if (progress > 0 && progress < 100)
+                {
+                    UpdateProcessingStatus($"Ollamaファイルを展開中... {progress:F0}%");
+                }
+                else if (progress >= 100)
+                {
+                    UpdateProcessingStatus("Ollama展開完了");
+                    _isOllamaExtracting = false;
+                }
+            }
+            else
+            {
+                if (progress > 0 && progress < 100)
+                {
+                    UpdateProcessingStatus("Ollamaダウンロード中...");
+                }
+            }
         });
     }
 
@@ -290,13 +367,41 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void Dispose()
     {
-        try
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// デストラクタ（ファイナライザ）
+    /// </summary>
+    ~MainWindowViewModel()
+    {
+        Dispose(false);
+    }
+
+    /// <summary>
+    /// リソースを解放する（内部実装）
+    /// </summary>
+    /// <param name="disposing">マネージドリソースも解放するかどうか</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (disposing)
         {
-            _ollamaManager?.Dispose();
-        }
-        catch (Exception ex)
-        {
-            LogMessage($"リソース解放中にエラー: {ex.Message}");
+            try
+            {
+                _ollamaManager?.Dispose();
+            }
+            catch (Exception ex)
+            {
+                try
+                {
+                    LogMessage($"リソース解放中にエラー: {ex.Message}");
+                }
+                catch
+                {
+                    // ログ出力も失敗する場合は無視
+                }
+            }
         }
     }
 }

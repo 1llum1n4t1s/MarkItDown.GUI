@@ -9,6 +9,7 @@
     <Version>1.0.2</Version>
     <Authors>ゆろち</Authors>
     <Title>MarkItDown.GUI</Title>
+    <ApplicationIcon>..\icon\app.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
     <PublishSingleFile>true</PublishSingleFile>

@@ -223,6 +223,62 @@ public class AppSettings
     }
 
     /// <summary>
+    /// Ollamaで使用するGPUデバイスIDを取得する
+    /// </summary>
+    /// <returns>GPUデバイスID（例: 0, 1, -1）。nullの場合はデフォルト値を使用</returns>
+    public static string? GetOllamaGpuDevice()
+    {
+        try
+        {
+            var device = _settingsDocument?.Root?.Element("OllamaGpuDevice")?.Value;
+            return string.IsNullOrWhiteSpace(device) ? null : device.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Ollamaで使用するGPUデバイスIDを保存する
+    /// </summary>
+    /// <param name="device">GPUデバイスID（例: 0, 1, -1=CPUのみ, 0,1=複数GPU）</param>
+    public static void SetOllamaGpuDevice(string? device)
+    {
+        try
+        {
+            var root = _settingsDocument?.Root;
+            if (root is null)
+            {
+                return;
+            }
+
+            var element = root.Element("OllamaGpuDevice");
+            if (string.IsNullOrEmpty(device))
+            {
+                element?.Remove();
+            }
+            else
+            {
+                if (element is null)
+                {
+                    root.Add(new XElement("OllamaGpuDevice", device));
+                }
+                else
+                {
+                    element.Value = device;
+                }
+            }
+
+            _settingsDocument?.Save(SettingsPath);
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to save OllamaGpuDevice: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// Get the default update feed URL (GitHub releases)
     /// </summary>
     private static string GetDefaultUpdateFeedUrl()
@@ -241,7 +297,8 @@ public class AppSettings
                 new XElement("UpdateFeedUrl", GetDefaultUpdateFeedUrl()),
                 new XElement("PythonVersion", ""),
                 new XElement("OllamaUrl", "http://localhost:11434"),
-                new XElement("OllamaModel", "llava:34b")
+                new XElement("OllamaModel", "llava"),
+                new XElement("OllamaGpuDevice", "0")
             );
 
             _settingsDocument = new XDocument(root);

@@ -13,16 +13,18 @@ namespace MarkItDown.GUI.Services;
 /// <summary>
 /// Ollamaとの連携を管理するクラス
 /// </summary>
-public class OllamaManager
+public class OllamaManager : IDisposable
 {
     private readonly Action<string> _logMessage;
     private readonly Action<double>? _progressCallback;
     private readonly HttpClient _httpClient;
     private string _ollamaUrl = "http://localhost:11434";
-    private string _defaultModel = "llava:34b";
+    private string _defaultModel = "llava";
     private bool _isAvailable;
     private Process? _ollamaProcess;
     private string _ollamaExePath = string.Empty;
+    private bool _isExtracting;
+    private bool _disposed;
 
     private static readonly HttpClient HttpClientForDownload = new()
     {
@@ -97,12 +99,14 @@ public class OllamaManager
                 }
             }
 
+            var needsStartup = false;
             if (string.IsNullOrEmpty(_ollamaExePath))
             {
                 _logMessage("埋め込みOllamaが見つからないため、ダウンロードを試行します。");
                 if (await DownloadAndExtractOllamaAsync(ollamaBaseDir))
                 {
                     _logMessage($"Ollamaの準備が完了しました: {_ollamaExePath}");
+                    needsStartup = true;
                 }
                 else
                 {
@@ -112,13 +116,16 @@ public class OllamaManager
                 }
             }
 
-            _isAvailable = await CheckOllamaAvailabilityAsync();
-
-            if (!_isAvailable)
+            if (!needsStartup)
             {
-                _logMessage("Ollamaサーバーが起動していないため、起動を試みます...");
+                _isAvailable = await CheckOllamaAvailabilityAsync();
+            }
+
+            if (!_isAvailable || needsStartup)
+            {
+                _logMessage("Ollamaサーバーを起動します...");
                 await StartOllamaServerAsync();
-                await Task.Delay(3000);
+                await Task.Delay(5000);
                 _isAvailable = await CheckOllamaAvailabilityAsync();
             }
 
@@ -298,6 +305,7 @@ public class OllamaManager
                 var buffer = new byte[8192];
                 var totalBytesRead = 0L;
                 int bytesRead;
+                var lastReportedProgress = 0.0;
                 
                 while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                 {
@@ -307,7 +315,12 @@ public class OllamaManager
                     if (totalBytes > 0)
                     {
                         var progress = (double)totalBytesRead / totalBytes * 100;
-                        _progressCallback?.Invoke(progress);
+                        
+                        if (progress - lastReportedProgress >= 0.5 || bytesRead < buffer.Length)
+                        {
+                            _progressCallback?.Invoke(progress);
+                            lastReportedProgress = progress;
+                        }
                         
                         if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
                         {
@@ -318,16 +331,53 @@ public class OllamaManager
             }
 
             _progressCallback?.Invoke(100);
-            _logMessage("ダウンロード完了、展開中...");
-            await Task.Delay(1000);
+            _logMessage("ダウンロード完了");
+            await Task.Delay(500);
 
+            _isExtracting = true;
             _progressCallback?.Invoke(0);
+            _logMessage("Ollamaアーカイブを展開中...");
             
-            ZipFile.ExtractToDirectory(archivePath, ollamaBaseDir, true);
+            await Task.Run(() =>
+            {
+                using var archive = ZipFile.OpenRead(archivePath);
+                var totalEntries = archive.Entries.Count;
+                var extractedCount = 0;
+                
+                _logMessage($"展開するファイル数: {totalEntries}");
+                
+                foreach (var entry in archive.Entries)
+                {
+                    var destinationPath = Path.Combine(ollamaBaseDir, entry.FullName);
+                    
+                    if (string.IsNullOrEmpty(entry.Name))
+                    {
+                        Directory.CreateDirectory(destinationPath);
+                    }
+                    else
+                    {
+                        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+                        entry.ExtractToFile(destinationPath, true);
+                    }
+                    
+                    extractedCount++;
+                    var progress = (double)extractedCount / totalEntries * 100;
+                    
+                    if (extractedCount % 5 == 0 || extractedCount == totalEntries)
+                    {
+                        _progressCallback?.Invoke(progress);
+                        _logMessage($"展開中: {extractedCount}/{totalEntries} ファイル ({progress:F1}%)");
+                    }
+                }
+            });
+            
+            _progressCallback?.Invoke(100);
+            _isExtracting = false;
             _logMessage("Ollamaの展開が完了しました。");
 
             await Task.Delay(500);
 
+            _logMessage("アーカイブファイルを削除中...");
             try
             {
                 File.Delete(archivePath);
@@ -338,6 +388,7 @@ public class OllamaManager
                 _logMessage($"アーカイブファイルの削除に失敗しました: {ex.Message}");
             }
 
+            _logMessage("Ollama実行ファイルを確認中...");
             var ollamaExe = Path.Combine(ollamaBaseDir, "ollama.exe");
             if (File.Exists(ollamaExe))
             {
@@ -383,6 +434,17 @@ public class OllamaManager
             };
 
             startInfo.Environment["OLLAMA_HOST"] = _ollamaUrl.Replace("http://", "");
+            
+            var gpuDevice = AppSettings.GetOllamaGpuDevice()?.Trim();
+            if (!string.IsNullOrEmpty(gpuDevice) && gpuDevice != "0")
+            {
+                startInfo.Environment["CUDA_VISIBLE_DEVICES"] = gpuDevice;
+                _logMessage($"GPU設定: CUDA_VISIBLE_DEVICES={gpuDevice}");
+            }
+            else
+            {
+                _logMessage("GPU設定: 自動検出（CUDA_VISIBLE_DEVICES未設定）");
+            }
 
             _ollamaProcess = Process.Start(startInfo);
             if (_ollamaProcess != null)
@@ -400,7 +462,8 @@ public class OllamaManager
                 {
                     if (!string.IsNullOrEmpty(e.Data))
                     {
-                        _logMessage($"Ollamaエラー: {e.Data}");
+                        var logLevel = GetOllamaLogLevel(e.Data);
+                        _logMessage($"Ollama[{logLevel}]: {e.Data}");
                     }
                 };
                 
@@ -416,6 +479,28 @@ public class OllamaManager
         {
             _logMessage($"Ollamaサーバー起動中にエラー: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Ollamaのログレベルを判定する
+    /// </summary>
+    /// <param name="logMessage">ログメッセージ</param>
+    /// <returns>ログレベル（INFO, WARN, ERROR）</returns>
+    private static string GetOllamaLogLevel(string logMessage)
+    {
+        if (logMessage.Contains("level=ERROR", StringComparison.OrdinalIgnoreCase))
+        {
+            return "ERROR";
+        }
+        if (logMessage.Contains("level=WARN", StringComparison.OrdinalIgnoreCase))
+        {
+            return "WARN";
+        }
+        if (logMessage.Contains("level=INFO", StringComparison.OrdinalIgnoreCase))
+        {
+            return "INFO";
+        }
+        return "INFO";
     }
 
     /// <summary>
@@ -482,19 +567,133 @@ public class OllamaManager
     /// </summary>
     public void Dispose()
     {
+        Dispose(true);
+        GC.SuppressFinalize(this);
+    }
+
+    /// <summary>
+    /// デストラクタ（ファイナライザ）
+    /// </summary>
+    ~OllamaManager()
+    {
+        Dispose(false);
+    }
+
+    /// <summary>
+    /// リソースを解放する（内部実装）
+    /// </summary>
+    /// <param name="disposing">マネージドリソースも解放するかどうか</param>
+    protected virtual void Dispose(bool disposing)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
         try
         {
             if (_ollamaProcess != null && !_ollamaProcess.HasExited)
             {
-                _logMessage("Ollamaサーバーを停止中...");
-                _ollamaProcess.Kill();
-                _ollamaProcess.WaitForExit(5000);
-                _ollamaProcess.Dispose();
+                try
+                {
+                    _logMessage("Ollamaサーバーを停止中...");
+                }
+                catch
+                {
+                    // ログ出力が失敗しても続行
+                }
+                
+                try
+                {
+                    _ollamaProcess.Kill(true);
+                    if (!_ollamaProcess.WaitForExit(5000))
+                    {
+                        try
+                        {
+                            _logMessage("Ollamaプロセスの終了を待機中にタイムアウトしました。");
+                        }
+                        catch
+                        {
+                            // ログ出力が失敗しても続行
+                        }
+                    }
+                }
+                catch (InvalidOperationException)
+                {
+                    // プロセスが既に終了している場合
+                }
+                catch
+                {
+                    // その他のエラーも無視して続行
+                }
+                finally
+                {
+                    if (disposing)
+                    {
+                        _ollamaProcess.Dispose();
+                    }
+                }
+            }
+            
+            KillOrphanedOllamaProcesses();
+            
+            if (disposing)
+            {
+                _httpClient?.Dispose();
             }
         }
-        catch (Exception ex)
+        catch
         {
-            _logMessage($"Ollamaプロセス停止中にエラー: {ex.Message}");
+            // 終了時のエラーは無視
+        }
+        finally
+        {
+            _disposed = true;
+        }
+    }
+
+    /// <summary>
+    /// 孤立したOllamaプロセスを強制終了する
+    /// </summary>
+    private void KillOrphanedOllamaProcesses()
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(_ollamaExePath))
+            {
+                return;
+            }
+
+            var ollamaProcesses = Process.GetProcessesByName("ollama");
+            foreach (var process in ollamaProcesses)
+            {
+                try
+                {
+                    var processPath = process.MainModule?.FileName;
+                    if (processPath != null && processPath.Equals(_ollamaExePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        try
+                        {
+                            _logMessage($"孤立したOllamaプロセスを終了します (PID: {process.Id})");
+                        }
+                        catch
+                        {
+                            // ログ出力が失敗しても続行
+                        }
+                        process.Kill(true);
+                        process.WaitForExit(2000);
+                    }
+                    process.Dispose();
+                }
+                catch
+                {
+                    // プロセスが既に終了している場合やアクセスできない場合は無視
+                }
+            }
+        }
+        catch
+        {
+            // 孤立プロセスのクリーンアップ失敗は無視
         }
     }
 }

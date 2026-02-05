@@ -16,9 +16,10 @@ namespace MarkItDown.GUI.Services;
 /// </summary>
 public partial class PythonEnvironmentManager
 {
-    private static readonly Version MaxEmbeddedPythonVersion = new(3, 12, 99);
+    private static readonly Version MinEmbeddedPythonVersion = new(3, 10, 0);
     private readonly SemaphoreSlim _pythonDetectionSemaphore = new(1, 1);
     private readonly Action<string> _logMessage;
+    private readonly Action<double>? _progressCallback;
     private string _pythonExecutablePath = string.Empty;
     private bool _pythonAvailable;
 
@@ -37,9 +38,11 @@ public partial class PythonEnvironmentManager
     /// コンストラクタ
     /// </summary>
     /// <param name="logMessage">ログ出力用デリゲート</param>
-    public PythonEnvironmentManager(Action<string> logMessage)
+    /// <param name="progressCallback">進捗コールバック関数（オプション）</param>
+    public PythonEnvironmentManager(Action<string> logMessage, Action<double>? progressCallback = null)
     {
         _logMessage = logMessage;
+        _progressCallback = progressCallback;
     }
 
     /// <summary>
@@ -311,15 +314,52 @@ public partial class PythonEnvironmentManager
             if (!File.Exists(zipPath))
             {
                 _logMessage($"埋め込みPythonをダウンロード中: {downloadUrl}");
+                _progressCallback?.Invoke(0);
+                
                 using var response = await HttpClientForVersion.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
                 response.EnsureSuccessStatusCode();
+                
+                var totalBytes = response.Content.Headers.ContentLength ?? 0;
+                _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
+                
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
                 await using var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                await contentStream.CopyToAsync(fileStream);
+                
+                var buffer = new byte[8192];
+                var totalBytesRead = 0L;
+                int bytesRead;
+                var lastReportedProgress = 0.0;
+                
+                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                {
+                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    totalBytesRead += bytesRead;
+                    
+                    if (totalBytes > 0)
+                    {
+                        var progress = (double)totalBytesRead / totalBytes * 100;
+                        
+                        if (progress - lastReportedProgress >= 0.5 || bytesRead < buffer.Length)
+                        {
+                            _progressCallback?.Invoke(progress);
+                            lastReportedProgress = progress;
+                        }
+                        
+                        if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
+                        {
+                            _logMessage($"ダウンロード進捗: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
+                        }
+                    }
+                }
+                
+                _progressCallback?.Invoke(100);
             }
 
             _logMessage("埋め込みPythonを展開中...");
+            _progressCallback?.Invoke(0);
+            await Task.Delay(500);
             ZipFile.ExtractToDirectory(zipPath, embeddedPythonPath, true);
+            _progressCallback?.Invoke(100);
 
             EnableSitePackages(embeddedPythonPath);
             await BootstrapPipAsync(embeddedPythonPath);
@@ -571,6 +611,11 @@ public partial class PythonEnvironmentManager
         return await GetLatestStablePythonVersionAsync();
     }
 
+    /// <summary>
+    /// サポートされている埋め込みPythonバージョンかどうかを判定する
+    /// </summary>
+    /// <param name="version">チェックするバージョン</param>
+    /// <returns>サポートされている場合はtrue</returns>
     private static bool IsSupportedEmbeddedPythonVersion(Version version)
-        => version <= MaxEmbeddedPythonVersion;
+        => version >= MinEmbeddedPythonVersion;
 }

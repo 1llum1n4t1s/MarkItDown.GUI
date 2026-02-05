@@ -15,6 +15,7 @@ namespace MarkItDown.GUI.Services;
 public partial class FfmpegManager
 {
     private readonly Action<string> _logMessage;
+    private readonly Action<double>? _progressCallback;
     private readonly SemaphoreSlim _ffmpegDetectionSemaphore = new(1, 1);
     private string _ffmpegPath = string.Empty;
     private bool _ffmpegAvailable;
@@ -29,9 +30,11 @@ public partial class FfmpegManager
     /// コンストラクタ
     /// </summary>
     /// <param name="logMessage">ログ出力用デリゲート</param>
-    public FfmpegManager(Action<string> logMessage)
+    /// <param name="progressCallback">進捗コールバック関数（オプション）</param>
+    public FfmpegManager(Action<string> logMessage, Action<double>? progressCallback = null)
     {
         _logMessage = logMessage;
+        _progressCallback = progressCallback;
     }
 
     /// <summary>
@@ -110,21 +113,56 @@ public partial class FfmpegManager
             var archivePath = Path.Combine(ffmpegBaseDir, fileName);
 
             _logMessage($"ffmpeg をダウンロード中: {downloadUrl}");
+            _progressCallback?.Invoke(0);
+            
             using (var response = await HttpClientForDownload.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
             {
                 response.EnsureSuccessStatusCode();
-                await using (var contentStream = await response.Content.ReadAsStreamAsync())
-                await using (var fileStream = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None))
+                
+                var totalBytes = response.Content.Headers.ContentLength ?? 0;
+                _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
+                
+                await using var contentStream = await response.Content.ReadAsStreamAsync();
+                await using var fileStream = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None);
+                
+                var buffer = new byte[8192];
+                var totalBytesRead = 0L;
+                int bytesRead;
+                var lastReportedProgress = 0.0;
+                
+                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                 {
-                    await contentStream.CopyToAsync(fileStream);
+                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    totalBytesRead += bytesRead;
+                    
+                    if (totalBytes > 0)
+                    {
+                        var progress = (double)totalBytesRead / totalBytes * 100;
+                        
+                        if (progress - lastReportedProgress >= 0.5 || bytesRead < buffer.Length)
+                        {
+                            _progressCallback?.Invoke(progress);
+                            lastReportedProgress = progress;
+                        }
+                        
+                        if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
+                        {
+                            _logMessage($"ダウンロード進捗: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
+                        }
+                    }
                 }
             }
+            
+            _progressCallback?.Invoke(100);
 
             _logMessage("ダウンロード完了、ファイルハンドルを解放中...");
             await Task.Delay(200);
 
             _logMessage("ffmpeg を展開中...");
+            _progressCallback?.Invoke(0);
+            await Task.Delay(500);
             await ExtractSevenZipAsync(archivePath, ffmpegBaseDir);
+            _progressCallback?.Invoke(100);
 
             _logMessage("展開完了後の待機中...");
             await Task.Delay(500);

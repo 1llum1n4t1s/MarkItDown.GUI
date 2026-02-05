@@ -39,23 +39,31 @@ jobs:
         run: dotnet publish MarkItDown.GUI/MarkItDown.GUI.csproj -c Release -o artifacts/publish -r win-x64
 
       - name: Velopack CLI をインストール
-        run: dotnet tool install --global vpk
+        shell: pwsh
+        run: |
+          dotnet tool install --global vpk
+          $toolsPath = "$env:USERPROFILE\.dotnet\tools"
+          Add-Content -LiteralPath $env:GITHUB_PATH -Value $toolsPath -Encoding utf8
 
       - name: Velopack パッケージを作成
+        shell: pwsh
         run: |
-          vpk pack \
-            --packId MarkItDown.GUI \
-            --packVersion $env:VPK_VERSION \
-            --packDir artifacts/publish \
-            --mainExe MarkItDown.GUI.exe \
+          vpk pack `
+            --packId MarkItDown.GUI `
+            --packVersion $env:VPK_VERSION `
+            --packDir artifacts/publish `
+            --mainExe MarkItDown.GUI.exe `
             --outputDir artifacts/releases
 
       - name: GitHub Releases へアップロード
+        shell: pwsh
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          vpk upload github \
-            --repo ${{ github.repository }} \
-            --releaseDir artifacts/releases \
-            --tag v$env:VPK_VERSION \
+          $repoUrl = "https://github.com/${{ github.repository }}"
+          vpk upload github `
+            --repoUrl $repoUrl `
+            --outputDir artifacts/releases `
+            --tag v$env:VPK_VERSION `
+            --publish `
             --token $env:GITHUB_TOKEN

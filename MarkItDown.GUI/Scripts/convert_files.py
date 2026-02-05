@@ -78,15 +78,16 @@ try:
                 log_message(f'Ollamaサーバーへの接続エラー: {e}')
                 return None
             
+            ollama_timeout_sec = 900
             log_message(f'Ollama APIリクエスト送信: {api_url}')
             log_message(f'モデル: {ollama_model}')
-            log_message('画像説明を生成中... (最大5分かかる場合があります)')
+            log_message(f'画像説明を生成中... (最大{ollama_timeout_sec // 60}分かかる場合があります)')
             
             try:
-                response = requests.post(api_url, json=payload, timeout=300)
+                response = requests.post(api_url, json=payload, timeout=ollama_timeout_sec)
                 log_message(f'レスポンス受信: ステータスコード {response.status_code}')
             except requests.exceptions.Timeout:
-                log_message('Ollama APIタイムアウト（300秒/5分）')
+                log_message(f'Ollama APIタイムアウト（{ollama_timeout_sec}秒/{ollama_timeout_sec // 60}分）')
                 log_message('画像が大きすぎるか、モデルの処理に時間がかかっています')
                 return None
             except requests.exceptions.ConnectionError as e:
@@ -99,6 +100,7 @@ try:
             if response.status_code == 200:
                 try:
                     result = response.json()
+                    log_message(f'Ollama APIレスポンス: {result}')
                     description = result.get('response', '')
                     if description:
                         log_message(f'Ollamaから説明を取得しました（{len(description)}文字）')

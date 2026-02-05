@@ -84,9 +84,24 @@
 ```xml
 <AppSettings>
   <OllamaUrl>http://localhost:11434</OllamaUrl>
-  <OllamaModel>llava</OllamaModel>
+  <OllamaModel>llava:34b</OllamaModel>
+  <OllamaGpuDevice>0</OllamaGpuDevice>
 </AppSettings>
 ```
+
+#### GPU設定（OllamaGpuDevice）
+
+使用するGPUを指定できます：
+
+- **未設定または`0`** (デフォルト): Ollamaが自動でGPUを検出して使用（推奨）
+- **`1`**: GPU 1のみを使用
+- **`0,1`**: GPU 0と1の両方を使用
+- **`-1`**: CPUのみ使用（GPUを使用しない）
+
+`CUDA_VISIBLE_DEVICES`を設定すると環境によってはGPUが検出されない場合があるため、デフォルトでは未設定（自動検出）にしています。複数GPUで特定のGPUを使いたい場合のみ設定してください。
+
+**GPU IDの確認方法:**
+コマンドプロンプトで `nvidia-smi -L` を実行すると、利用可能なGPUのリストが表示されます。
 
 ### 使用可能なモデル
 

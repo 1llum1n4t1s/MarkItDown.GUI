@@ -39,4 +39,10 @@ public static class TimeoutSettings
     /// Timeout for generic command execution (default)
     /// </summary>
     public const int DefaultCommandTimeoutMs = 30000;
+
+    /// <summary>
+    /// Timeout for MarkItDown file conversion (10 minutes)
+    /// Ollamaでの画像説明生成を含む場合、処理に時間がかかるため長めに設定
+    /// </summary>
+    public const int FileConversionTimeoutMs = 600000;
 }

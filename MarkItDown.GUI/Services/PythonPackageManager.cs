@@ -1,6 +1,7 @@
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Text;
 
 namespace MarkItDown.GUI.Services;
@@ -256,7 +257,7 @@ public class PythonPackageManager
             var installInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
-                Arguments = "-m pip install markitdown[all]",
+                Arguments = "-m pip install --upgrade \"markitdown[all]\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -266,12 +267,25 @@ public class PythonPackageManager
             using var installProc = Process.Start(installInfo);
             if (installProc != null)
             {
-                string output = installProc.StandardOutput.ReadToEnd();
-                string error = installProc.StandardError.ReadToEnd();
+                var output = installProc.StandardOutput.ReadToEnd();
+                var error = installProc.StandardError.ReadToEnd();
                 installProc.WaitForExit(TimeoutSettings.PackageInstallTimeoutMs);
                 _logMessage($"pip出力: {output}");
+                
                 if (!string.IsNullOrEmpty(error))
-                    _logMessage($"pipエラー: {error}");
+                {
+                    var errorLines = error.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+                    var filteredErrors = errorLines.Where(line => 
+                        !line.Contains("WARNING: The script") && 
+                        !line.Contains("is installed in") && 
+                        !line.Contains("which is not on PATH") &&
+                        !line.Contains("Consider adding this directory to PATH"));
+                    var filteredError = string.Join('\n', filteredErrors).Trim();
+                    if (!string.IsNullOrEmpty(filteredError))
+                    {
+                        _logMessage($"pipエラー: {filteredError}");
+                    }
+                }
                 
                 if (installProc.ExitCode == 0)
                 {
