@@ -4,9 +4,11 @@ on:
   push:
     branches-ignore:
       - releases
+      - release/**
   pull_request:
     branches-ignore:
       - releases
+      - release/**
 
 jobs:
   build:

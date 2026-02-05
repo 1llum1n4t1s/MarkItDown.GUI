@@ -19,7 +19,7 @@ public class OllamaManager
     private readonly Action<double>? _progressCallback;
     private readonly HttpClient _httpClient;
     private string _ollamaUrl = "http://localhost:11434";
-    private string _defaultModel = "llava";
+    private string _defaultModel = "llava:34b";
     private bool _isAvailable;
     private Process? _ollamaProcess;
     private string _ollamaExePath = string.Empty;

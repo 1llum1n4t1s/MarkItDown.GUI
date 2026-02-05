@@ -241,7 +241,7 @@ public class AppSettings
                 new XElement("UpdateFeedUrl", GetDefaultUpdateFeedUrl()),
                 new XElement("PythonVersion", ""),
                 new XElement("OllamaUrl", "http://localhost:11434"),
-                new XElement("OllamaModel", "llava")
+                new XElement("OllamaModel", "llava:34b")
             );
 
             _settingsDocument = new XDocument(root);
