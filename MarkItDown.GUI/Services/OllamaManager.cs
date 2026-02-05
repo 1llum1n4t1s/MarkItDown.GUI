@@ -280,6 +280,11 @@ public class OllamaManager : IDisposable
     /// </summary>
     private async Task<bool> DownloadAndExtractOllamaAsync(string ollamaBaseDir)
     {
+        if (_isExtracting)
+        {
+            _logMessage("既に展開処理が実行中です。");
+            return false;
+        }
         try
         {
             _logMessage("GitHub から Ollama をダウンロード中...");

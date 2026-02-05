@@ -13,6 +13,7 @@ internal static class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        VelopackApp.Build().Run();
         Logger.Initialize();
         Logger.LogStartup(args);
         Logger.Log("アプリケーション起動", LogLevel.Info);
