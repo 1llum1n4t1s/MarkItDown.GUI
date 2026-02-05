@@ -72,15 +72,27 @@ public class PythonPackageManager
     {
         try
         {
+            // パッケージ名の入力検証（英数字、アンダースコア、ハイフン、ドットのみ許可）
+            if (!System.Text.RegularExpressions.Regex.IsMatch(packageName, @"^[a-zA-Z0-9_.-]+$"))
+            {
+                System.Diagnostics.Debug.WriteLine($"Invalid package name: {packageName}");
+                return false;
+            }
+
             var checkInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
-                Arguments = $"-c \"import {packageName}\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+
+            // パッケージ名をアンダースコア化（importで使用できるようにする）
+            var importName = packageName.Replace("-", "_");
+
+            checkInfo.ArgumentList.Add("-c");
+            checkInfo.ArgumentList.Add($"import {importName}");
 
             using var checkProc = Process.Start(checkInfo);
             if (checkProc != null)
@@ -105,16 +117,27 @@ public class PythonPackageManager
     {
         try
         {
+            // パッケージ名の入力検証（英数字、アンダースコア、ハイフンのみ許可）
+            if (!System.Text.RegularExpressions.Regex.IsMatch(packageName, @"^[a-zA-Z0-9_-]+$"))
+            {
+                _logMessage($"不正なパッケージ名: {packageName}");
+                return;
+            }
+
             _logMessage($"pipで{packageName}をインストール中...");
             var installInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
-                Arguments = $"-m pip install {packageName}",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
+
+            installInfo.ArgumentList.Add("-m");
+            installInfo.ArgumentList.Add("pip");
+            installInfo.ArgumentList.Add("install");
+            installInfo.ArgumentList.Add(packageName);
 
             using var installProc = Process.Start(installInfo);
             if (installProc != null)
@@ -180,13 +203,15 @@ public class PythonPackageManager
             var checkInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
-                Arguments = "-c \"import markitdown\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
-            
+
+            checkInfo.ArgumentList.Add("-c");
+            checkInfo.ArgumentList.Add("import markitdown");
+
             using var checkProc = Process.Start(checkInfo);
             if (checkProc != null)
             {
@@ -213,13 +238,18 @@ public class PythonPackageManager
             var uninstallInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
-                Arguments = "-m pip uninstall markitdown -y",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
-            
+
+            uninstallInfo.ArgumentList.Add("-m");
+            uninstallInfo.ArgumentList.Add("pip");
+            uninstallInfo.ArgumentList.Add("uninstall");
+            uninstallInfo.ArgumentList.Add("markitdown");
+            uninstallInfo.ArgumentList.Add("-y");
+
             using var uninstallProc = Process.Start(uninstallInfo);
             if (uninstallProc != null)
             {
@@ -229,7 +259,7 @@ public class PythonPackageManager
                 _logMessage($"pipアンインストール出力: {output}");
                 if (!string.IsNullOrEmpty(error))
                     _logMessage($"pipアンインストールエラー: {error}");
-                
+
                 if (uninstallProc.ExitCode == 0)
                 {
                     _logMessage("markitdownのアンインストールが完了したのだ");
@@ -257,13 +287,18 @@ public class PythonPackageManager
             var installInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
-                Arguments = "-m pip install --upgrade \"markitdown[all]\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true
             };
-            
+
+            installInfo.ArgumentList.Add("-m");
+            installInfo.ArgumentList.Add("pip");
+            installInfo.ArgumentList.Add("install");
+            installInfo.ArgumentList.Add("--upgrade");
+            installInfo.ArgumentList.Add("markitdown[all]");
+
             using var installProc = Process.Start(installInfo);
             if (installProc != null)
             {
@@ -271,13 +306,13 @@ public class PythonPackageManager
                 var error = installProc.StandardError.ReadToEnd();
                 installProc.WaitForExit(TimeoutSettings.PackageInstallTimeoutMs);
                 _logMessage($"pip出力: {output}");
-                
+
                 if (!string.IsNullOrEmpty(error))
                 {
                     var errorLines = error.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                    var filteredErrors = errorLines.Where(line => 
-                        !line.Contains("WARNING: The script") && 
-                        !line.Contains("is installed in") && 
+                    var filteredErrors = errorLines.Where(line =>
+                        !line.Contains("WARNING: The script") &&
+                        !line.Contains("is installed in") &&
                         !line.Contains("which is not on PATH") &&
                         !line.Contains("Consider adding this directory to PATH"));
                     var filteredError = string.Join('\n', filteredErrors).Trim();
@@ -286,7 +321,7 @@ public class PythonPackageManager
                         _logMessage($"pipエラー: {filteredError}");
                     }
                 }
-                
+
                 if (installProc.ExitCode == 0)
                 {
                     _logMessage("markitdownのインストールが完了したのだ");

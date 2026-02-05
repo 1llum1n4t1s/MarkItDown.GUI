@@ -254,9 +254,9 @@ public class MarkItDownProcessor
     /// <returns>Python script content</returns>
     private string CreateMarkItDownCheckScript(string appDir)
     {
-        // Windowsパスのバックスラッシュをエスケープする
-        var escapedAppDir = appDir.Replace("\\", "\\\\");
-        
+        // Pythonスクリプト内で使用するため、文字列全体をエスケープする
+        var escapedAppDir = appDir.Replace("\\", "\\\\").Replace("\"", "\\\"");
+
         return $@"
 import os
 import sys
@@ -269,7 +269,7 @@ try:
     log_message('Pythonチェックスクリプト開始')
 
     # アプリケーションディレクトリを使用
-    log_message('アプリケーションディレクトリ: {escapedAppDir}')
+    log_message(f'アプリケーションディレクトリ: ""{escapedAppDir}""')
 
     # Pythonのバージョンとパスを確認
     log_message('Pythonバージョン: ' + sys.version)

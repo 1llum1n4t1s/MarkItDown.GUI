@@ -21,6 +21,10 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private string _processingStatus = string.Empty;
     private double _downloadProgress;
     private bool _isDownloading;
+    private readonly List<string> _logBatch = new();
+    private readonly object _logBatchLock = new();
+    private const int MaxLogLines = 10000; // ログ行数上限（メモリ節約）
+    private int _logLineCount = 1;
 
     private static readonly IBrush DefaultDropZoneBrush = new SolidColorBrush(Color.Parse("#D3D3D3"));
     private static readonly IBrush DragOverBrush = new SolidColorBrush(Color.Parse("#ADD8E6"));
@@ -95,7 +99,14 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         _dropZoneBackground = DefaultDropZoneBrush;
-        _ = InitializeManagersAsync();
+        _ = InitializeManagersAsync().ContinueWith(task =>
+        {
+            if (task.IsFaulted)
+            {
+                var ex = task.Exception?.GetBaseException();
+                LogMessage($"初期化エラー: {ex?.Message}");
+            }
+        }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
     }
 
     /// <summary>
@@ -153,7 +164,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// ログメッセージを画面に追加する
+    /// ログメッセージを画面に追加する（バッチ処理版）
     /// </summary>
     /// <param name="message">表示するメッセージ</param>
     public void LogMessage(string message)
@@ -161,17 +172,68 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         try
         {
             Logger.Log(message, LogLevel.Info);
-            
-            Dispatcher.UIThread.Post(() =>
+
+            lock (_logBatchLock)
             {
                 var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-                LogText += $"[{timestamp}] {message}\n";
-            }, DispatcherPriority.Background);
+                _logBatch.Add($"[{timestamp}] {message}");
+
+                // バッチサイズが 10 に達したら UI スレッドにポスト
+                if (_logBatch.Count >= 10)
+                {
+                    FlushLogBatch();
+                }
+            }
         }
         catch (Exception ex)
         {
             System.Diagnostics.Debug.WriteLine($"Failed to log message: {ex.Message}");
             Logger.LogException("ログメッセージの追加に失敗しました", ex);
+        }
+    }
+
+    /// <summary>
+    /// ログバッチを UI スレッドにフラッシュ（StringBuilder版で大規模ログを効率化）
+    /// </summary>
+    private void FlushLogBatch()
+    {
+        if (_logBatch.Count == 0)
+        {
+            return;
+        }
+
+        // StringBuilderで効率的に結合
+        var sb = new System.Text.StringBuilder(_logBatch.Count * 50);
+        foreach (var msg in _logBatch)
+        {
+            sb.AppendLine(msg);
+            _logLineCount++;
+        }
+        var batchContent = sb.ToString();
+        _logBatch.Clear();
+
+        Dispatcher.UIThread.Post(() =>
+        {
+            // ログ行数上限超過時は古いログを削除
+            if (_logLineCount > MaxLogLines)
+            {
+                var lines = LogText.Split('\n');
+                int linesToRemove = Math.Max(1, _logLineCount - MaxLogLines);
+                LogText = string.Join("\n", lines.Skip(linesToRemove));
+                _logLineCount = MaxLogLines;
+            }
+            LogText += batchContent;
+        }, DispatcherPriority.Background);
+    }
+
+    /// <summary>
+    /// 残っているログバッチを全てフラッシュする
+    /// </summary>
+    private void FlushLogBatchFinal()
+    {
+        lock (_logBatchLock)
+        {
+            FlushLogBatch();
         }
     }
 
@@ -228,6 +290,8 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         }
         finally
         {
+            // 残っているログを全てフラッシュ
+            FlushLogBatchFinal();
             HideProcessing();
             SetDropZoneDefault();
         }

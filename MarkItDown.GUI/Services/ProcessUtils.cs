@@ -64,7 +64,6 @@ public static class ProcessUtils
             var startInfo = new ProcessStartInfo
             {
                 FileName = command,
-                Arguments = "--version",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -72,6 +71,9 @@ public static class ProcessUtils
                 StandardOutputEncoding = Encoding.UTF8,
                 StandardErrorEncoding = Encoding.UTF8
             };
+
+            // Arguments プロパティの代わりに ArgumentList を使用（セキュアコマンド実行）
+            startInfo.ArgumentList.Add("--version");
 
             using var process = Process.Start(startInfo);
             if (process == null)

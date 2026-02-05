@@ -277,6 +277,7 @@ public partial class PythonEnvironmentManager
         var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
         var basePythonDir = Path.Combine(appDirectory, "lib", "python");
         var embeddedPythonPath = Path.Combine(basePythonDir, "python-embed");
+        var embeddedPythonBackupPath = embeddedPythonPath + ".backup";
 
         try
         {
@@ -303,37 +304,80 @@ public partial class PythonEnvironmentManager
             var zipFileName = $"python-{targetVersion}-embed-amd64.zip";
             var zipPath = Path.Combine(basePythonDir, zipFileName);
             var downloadUrl = new Uri($"https://www.python.org/ftp/python/{targetVersion}/{zipFileName}");
-
             if (Directory.Exists(embeddedPythonPath))
             {
-                Directory.Delete(embeddedPythonPath, true);
+                if (Directory.Exists(embeddedPythonBackupPath))
+                {
+                    Directory.Delete(embeddedPythonBackupPath, true);
+                }
+                Directory.Move(embeddedPythonPath, embeddedPythonBackupPath);
             }
 
-            Directory.CreateDirectory(embeddedPythonPath);
+            try
+            {
+                Directory.CreateDirectory(embeddedPythonPath);
+            }
+            catch (Exception ex)
+            {
+                _logMessage($"ディレクトリ作成エラー: {ex.Message}");
+                // バックアップから復旧
+                if (Directory.Exists(embeddedPythonBackupPath))
+                {
+                    if (Directory.Exists(embeddedPythonPath))
+                    {
+                        Directory.Delete(embeddedPythonPath, true);
+                    }
+                    Directory.Move(embeddedPythonBackupPath, embeddedPythonPath);
+                }
+                return false;
+            }
 
             if (!File.Exists(zipPath))
             {
                 _logMessage($"埋め込みPythonをダウンロード中: {downloadUrl}");
                 _progressCallback?.Invoke(0);
-                
+
                 using var response = await HttpClientForVersion.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
                 response.EnsureSuccessStatusCode();
-                
+
                 var totalBytes = response.Content.Headers.ContentLength ?? 0;
-                _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
-                
+
+                // ダウンロードサイズの上限チェック（1GB以上は拒否）
+                const long MaxDownloadSize = 1024L * 1024L * 1024L; // 1GB
+
+                if (totalBytes <= 0)
+                {
+                    _logMessage("警告: ダウンロードサイズが不明です。続行します。");
+                }
+                else if (totalBytes > MaxDownloadSize)
+                {
+                    _logMessage($"エラー: ダウンロードサイズが大きすぎます（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
+                    throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
+                }
+                else
+                {
+                    _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
+                }
+
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
                 await using var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
-                
+
                 var buffer = new byte[8192];
                 var totalBytesRead = 0L;
                 int bytesRead;
                 var lastReportedProgress = 0.0;
-                
+
                 while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                 {
-                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    // ダウンロードサイズの追加チェック
                     totalBytesRead += bytesRead;
+                    if (totalBytesRead > MaxDownloadSize)
+                    {
+                        _logMessage($"エラー: ダウンロードサイズが上限を超えました");
+                        throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
+                    }
+
+                    await fileStream.WriteAsync(buffer, 0, bytesRead);
                     
                     if (totalBytes > 0)
                     {
@@ -358,8 +402,27 @@ public partial class PythonEnvironmentManager
             _logMessage("埋め込みPythonを展開中...");
             _progressCallback?.Invoke(0);
             await Task.Delay(500);
-            ZipFile.ExtractToDirectory(zipPath, embeddedPythonPath, true);
-            _progressCallback?.Invoke(100);
+
+            try
+            {
+                ZipFile.ExtractToDirectory(zipPath, embeddedPythonPath, true);
+                _progressCallback?.Invoke(100);
+            }
+            catch (Exception ex)
+            {
+                _logMessage($"展開エラー: {ex.Message}");
+                // バックアップから復旧
+                if (Directory.Exists(embeddedPythonBackupPath))
+                {
+                    if (Directory.Exists(embeddedPythonPath))
+                    {
+                        Directory.Delete(embeddedPythonPath, true);
+                    }
+                    Directory.Move(embeddedPythonBackupPath, embeddedPythonPath);
+                    _logMessage("バックアップから復旧しました。");
+                }
+                return false;
+            }
 
             EnableSitePackages(embeddedPythonPath);
             await BootstrapPipAsync(embeddedPythonPath);
@@ -367,7 +430,30 @@ public partial class PythonEnvironmentManager
             if (!IsEmbeddedPythonReady(embeddedPythonPath))
             {
                 _logMessage("埋め込みPythonの展開に失敗しました。");
+                // バックアップから復旧
+                if (Directory.Exists(embeddedPythonBackupPath))
+                {
+                    if (Directory.Exists(embeddedPythonPath))
+                    {
+                        Directory.Delete(embeddedPythonPath, true);
+                    }
+                    Directory.Move(embeddedPythonBackupPath, embeddedPythonPath);
+                    _logMessage("バックアップから復旧しました。");
+                }
                 return false;
+            }
+
+            // 成功したのでバックアップを削除
+            if (Directory.Exists(embeddedPythonBackupPath))
+            {
+                try
+                {
+                    Directory.Delete(embeddedPythonBackupPath, true);
+                }
+                catch
+                {
+                    _logMessage("バックアップ削除エラー（処理は継続）");
+                }
             }
 
             WriteEmbeddedPythonVersion(versionFilePath, targetVersion);
@@ -379,6 +465,23 @@ public partial class PythonEnvironmentManager
         catch (Exception ex)
         {
             _logMessage($"埋め込みPythonのダウンロード/展開に失敗しました: {ex.Message}");
+            // バックアップから復旧（内側のtryで処理されなかった場合）
+            try
+            {
+                if (Directory.Exists(embeddedPythonBackupPath))
+                {
+                    if (Directory.Exists(embeddedPythonPath))
+                    {
+                        Directory.Delete(embeddedPythonPath, true);
+                    }
+                    Directory.Move(embeddedPythonBackupPath, embeddedPythonPath);
+                    _logMessage("バックアップから復旧しました。");
+                }
+            }
+            catch
+            {
+                _logMessage("復旧に失敗しました。");
+            }
             return false;
         }
     }

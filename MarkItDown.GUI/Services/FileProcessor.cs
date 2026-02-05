@@ -14,6 +14,7 @@ public class FileProcessor
 {
     private readonly MarkItDownProcessor _markItDownProcessor;
     private readonly Action<string> _logMessage;
+    private readonly Dictionary<string, (long ticks, DateTime timestamp)> _fileCache = new();
 
     private enum PathType
     {
@@ -108,15 +109,12 @@ public class FileProcessor
     }
 
     /// <summary>
-    /// Process files and folders using MarkItDown
+    /// Process files and folders using MarkItDown (with parallel execution support)
     /// </summary>
     /// <param name="files">List of files to process</param>
     /// <param name="folders">List of folders to process</param>
     private async Task ProcessFilesWithMarkItDownAsync(IReadOnlyCollection<string> files, IReadOnlyCollection<string> folders)
     {
-        string? tempFilePathsJson = null;
-        string? tempFolderPathsJson = null;
-
         try
         {
             // MarkItDownライブラリの利用可能性を事前にチェック
@@ -142,35 +140,143 @@ public class FileProcessor
             // アプリケーションディレクトリを取得
             var appDir = Directory.GetCurrentDirectory();
             _logMessage($"C#側アプリケーションディレクトリ: {appDir}");
-                
-            // ファイルとフォルダのパスを設定
-            var filePathsJson = JsonSerializer.Serialize(files);
-            var folderPathsJson = JsonSerializer.Serialize(folders);
-                
-            _logMessage($"ファイルパスJSON: {filePathsJson}");
-            _logMessage($"フォルダパスJSON: {folderPathsJson}");
-                
-            // JSON文字列をファイルに保存して、ファイルパスを渡す
-            var tempDirectory = Path.GetTempPath();
-            tempFilePathsJson = Path.Combine(tempDirectory, $"markitdown_files_{Guid.NewGuid():N}.json");
-            tempFolderPathsJson = Path.Combine(tempDirectory, $"markitdown_folders_{Guid.NewGuid():N}.json");
-                
-            // BOMなしのUTF-8でファイルを保存
-            var utf8NoBom = new UTF8Encoding(false);
-            File.WriteAllText(tempFilePathsJson, filePathsJson, utf8NoBom);
-            File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);
-                
-            _logMessage($"一時ファイルパス: {tempFilePathsJson}");
-            _logMessage($"一時フォルダパス: {tempFolderPathsJson}");
-                
-            // Pythonスクリプトを実行
-            await Task.Run(() => _markItDownProcessor.ExecuteMarkItDownConvertScript(appDir, tempFilePathsJson, tempFolderPathsJson));
+
+            // ファイル・フォルダを並列処理
+            // 最大3タスク同時実行で制限
+            const int maxParallelTasks = 3;
+
+            // ファイルを並列処理（メモリ効率的なバッチ処理）
+            if (files.Count > 0)
+            {
+                var fileArray = files.ToArray();
+                for (int i = 0; i < fileArray.Length; i += maxParallelTasks)
+                {
+                    int batchSize = Math.Min(maxParallelTasks, fileArray.Length - i);
+                    var batchTasks = new Task[batchSize];
+                    for (int j = 0; j < batchSize; j++)
+                    {
+                        batchTasks[j] = ProcessSingleFileAsync(appDir, fileArray[i + j]);
+                    }
+                    await Task.WhenAll(batchTasks);
+                }
+            }
+
+            // フォルダを並列処理（メモリ効率的なバッチ処理）
+            if (folders.Count > 0)
+            {
+                var folderArray = folders.ToArray();
+                for (int i = 0; i < folderArray.Length; i += maxParallelTasks)
+                {
+                    int batchSize = Math.Min(maxParallelTasks, folderArray.Length - i);
+                    var batchTasks = new Task[batchSize];
+                    for (int j = 0; j < batchSize; j++)
+                    {
+                        batchTasks[j] = ProcessSingleFolderAsync(appDir, folderArray[i + j]);
+                    }
+                    await Task.WhenAll(batchTasks);
+                }
+            }
+
+            _logMessage("すべてのファイル・フォルダ処理が完了しました。");
         }
         catch (Exception ex)
         {
             _logMessage($"MarkItDown変換中にエラーが発生: {ex.Message}");
             _logMessage($"スタックトレース: {ex.StackTrace}");
-            _logMessage($"MarkItDown変換中にエラーが発生しました: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Process a single file using MarkItDown
+    /// </summary>
+    /// <param name="appDir">Application directory</param>
+    /// <param name="filePath">File path to process</param>
+    private async Task ProcessSingleFileAsync(string appDir, string filePath)
+    {
+        string? tempFilePathsJson = null;
+        string? tempFolderPathsJson = null;
+
+        try
+        {
+            _logMessage($"ファイル処理開始: {filePath}");
+
+            // キャッシュをチェック - 既に処理済みの場合はスキップ
+            if (IsFileAlreadyProcessed(filePath))
+            {
+                _logMessage($"ファイルをスキップしました: {filePath}");
+                return;
+            }
+
+            // 単一ファイルのリストを作成
+            var files = new[] { filePath };
+            var folders = new string[] { };
+
+            // JSON文字列をファイルに保存して、ファイルパスを渡す
+            var tempDirectory = Path.GetTempPath();
+            tempFilePathsJson = Path.Combine(tempDirectory, $"markitdown_files_{Guid.NewGuid():N}.json");
+            tempFolderPathsJson = Path.Combine(tempDirectory, $"markitdown_folders_{Guid.NewGuid():N}.json");
+
+            // BOMなしのUTF-8でファイルを保存
+            var utf8NoBom = new UTF8Encoding(false);
+            var filePathsJson = JsonSerializer.Serialize(files);
+            var folderPathsJson = JsonSerializer.Serialize(folders);
+
+            File.WriteAllText(tempFilePathsJson, filePathsJson, utf8NoBom);
+            File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);
+
+            // Pythonスクリプトを実行
+            await Task.Run(() => _markItDownProcessor.ExecuteMarkItDownConvertScript(appDir, tempFilePathsJson, tempFolderPathsJson));
+            _logMessage($"ファイル処理完了: {filePath}");
+        }
+        catch (Exception ex)
+        {
+            _logMessage($"ファイル処理エラー ({filePath}): {ex.Message}");
+        }
+        finally
+        {
+            CleanupTempFile(tempFilePathsJson);
+            CleanupTempFile(tempFolderPathsJson);
+        }
+    }
+
+    /// <summary>
+    /// Process a single folder using MarkItDown
+    /// </summary>
+    /// <param name="appDir">Application directory</param>
+    /// <param name="folderPath">Folder path to process</param>
+    private async Task ProcessSingleFolderAsync(string appDir, string folderPath)
+    {
+        string? tempFilePathsJson = null;
+        string? tempFolderPathsJson = null;
+
+        try
+        {
+            _logMessage($"フォルダ処理開始: {folderPath}");
+
+            // 単一フォルダのリストを作成
+            var files = new string[] { };
+            var folders = new[] { folderPath };
+
+            // JSON文字列をファイルに保存して、ファイルパスを渡す
+            var tempDirectory = Path.GetTempPath();
+            tempFilePathsJson = Path.Combine(tempDirectory, $"markitdown_files_{Guid.NewGuid():N}.json");
+            tempFolderPathsJson = Path.Combine(tempDirectory, $"markitdown_folders_{Guid.NewGuid():N}.json");
+
+            // BOMなしのUTF-8でファイルを保存
+            var utf8NoBom = new UTF8Encoding(false);
+            var filePathsJson = JsonSerializer.Serialize(files);
+            var folderPathsJson = JsonSerializer.Serialize(folders);
+
+            File.WriteAllText(tempFilePathsJson, filePathsJson, utf8NoBom);
+            File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);
+
+            // Pythonスクリプトを実行
+            await Task.Run(() => _markItDownProcessor.ExecuteMarkItDownConvertScript(appDir, tempFilePathsJson, tempFolderPathsJson));
+            _logMessage($"フォルダ処理完了: {folderPath}");
+        }
+        catch (Exception ex)
+        {
+            _logMessage($"フォルダ処理エラー ({folderPath}): {ex.Message}");
         }
         finally
         {
@@ -198,5 +304,37 @@ public class FileProcessor
         {
             _logMessage($"一時ファイル削除に失敗: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// Check if file has been processed before (optimized: use file modification time instead of hash)
+    /// </summary>
+    /// <param name="filePath">File path to check</param>
+    /// <returns>True if file was cached and not modified</returns>
+    private bool IsFileAlreadyProcessed(string filePath)
+    {
+        if (!File.Exists(filePath))
+        {
+            return false;
+        }
+
+        var fileInfo = new FileInfo(filePath);
+        var currentModifiedTime = fileInfo.LastWriteTimeUtc;
+
+        if (_fileCache.TryGetValue(filePath, out var cached))
+        {
+            // Check if file modification time is unchanged and was cached within 5 minutes
+            // UTC時刻を使用してシステム時刻ズレに対応
+            if (cached.ticks == currentModifiedTime.Ticks && (DateTime.UtcNow - cached.timestamp).TotalSeconds < 300)
+            {
+                _logMessage($"キャッシュ: {Path.GetFileName(filePath)} は既に処理済みです。");
+                return true;
+            }
+        }
+
+        // Update cache with modification time (Ticks) instead of hash
+        // UTCタイムスタンプを使用
+        _fileCache[filePath] = (currentModifiedTime.Ticks, DateTime.UtcNow);
+        return false;
     }
 }

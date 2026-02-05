@@ -118,22 +118,45 @@ public partial class FfmpegManager
             using (var response = await HttpClientForDownload.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
             {
                 response.EnsureSuccessStatusCode();
-                
+
                 var totalBytes = response.Content.Headers.ContentLength ?? 0;
-                _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
-                
+
+                // ダウンロードサイズの上限チェック（1GB以上は拒否）
+                const long MaxDownloadSize = 1024L * 1024L * 1024L; // 1GB
+
+                if (totalBytes <= 0)
+                {
+                    _logMessage("警告: ダウンロードサイズが不明です。続行します。");
+                }
+                else if (totalBytes > MaxDownloadSize)
+                {
+                    _logMessage($"エラー: ダウンロードサイズが大きすぎます（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
+                    throw new InvalidOperationException($"ダウンロードサイズが上限を超えています");
+                }
+                else
+                {
+                    _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
+                }
+
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
                 await using var fileStream = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None);
-                
+
                 var buffer = new byte[8192];
                 var totalBytesRead = 0L;
                 int bytesRead;
                 var lastReportedProgress = 0.0;
-                
+
                 while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                 {
-                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    // ダウンロードサイズの追加チェック
                     totalBytesRead += bytesRead;
+                    if (totalBytesRead > MaxDownloadSize)
+                    {
+                        _logMessage($"エラー: ダウンロードサイズが上限を超えました");
+                        throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
+                    }
+
+                    await fileStream.WriteAsync(buffer, 0, bytesRead);
                     
                     if (totalBytes > 0)
                     {
@@ -247,5 +270,8 @@ public partial class FfmpegManager
                 await Task.Delay(1000);
             }
         }
+
+        // リトライ回数超過時の処理
+        throw new IOException($"7zアーカイブの展開に失敗しました（最大リトライ回数 {maxRetries} 回を超過）");
     }
 }

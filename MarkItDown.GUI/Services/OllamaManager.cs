@@ -300,22 +300,45 @@ public class OllamaManager : IDisposable
             using (var response = await HttpClientForDownload.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
             {
                 response.EnsureSuccessStatusCode();
-                
+
                 var totalBytes = response.Content.Headers.ContentLength ?? 0;
-                _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
-                
+
+                // ダウンロードサイズの上限チェック（1GB以上は拒否）
+                const long MaxDownloadSize = 1024L * 1024L * 1024L; // 1GB
+
+                if (totalBytes <= 0)
+                {
+                    _logMessage("警告: ダウンロードサイズが不明です。続行します。");
+                }
+                else if (totalBytes > MaxDownloadSize)
+                {
+                    _logMessage($"エラー: ダウンロードサイズが大きすぎます（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
+                    throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
+                }
+                else
+                {
+                    _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
+                }
+
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
                 await using var fileStream = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None);
-                
+
                 var buffer = new byte[8192];
                 var totalBytesRead = 0L;
                 int bytesRead;
                 var lastReportedProgress = 0.0;
-                
+
                 while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                 {
-                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    // ダウンロードサイズの追加チェック
                     totalBytesRead += bytesRead;
+                    if (totalBytesRead > MaxDownloadSize)
+                    {
+                        _logMessage($"エラー: ダウンロードサイズが上限を超えました");
+                        throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
+                    }
+
+                    await fileStream.WriteAsync(buffer, 0, bytesRead);
                     
                     if (totalBytes > 0)
                     {
@@ -438,7 +461,11 @@ public class OllamaManager : IDisposable
                 WorkingDirectory = Path.GetDirectoryName(_ollamaExePath)
             };
 
-            startInfo.Environment["OLLAMA_HOST"] = _ollamaUrl.Replace("http://", "");
+            // URLプロトコルを削除（http://またはhttps://）
+            var ollamaHost = _ollamaUrl
+                .Replace("https://", "")
+                .Replace("http://", "");
+            startInfo.Environment["OLLAMA_HOST"] = ollamaHost;
             
             var gpuDevice = AppSettings.GetOllamaGpuDevice()?.Trim();
             if (!string.IsNullOrEmpty(gpuDevice) && gpuDevice != "0")
@@ -540,7 +567,8 @@ public class OllamaManager : IDisposable
                 var output = await process.StandardOutput.ReadToEndAsync();
                 var error = await process.StandardError.ReadToEndAsync();
 
-                await process.WaitForExitAsync();
+                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(10));
+                await process.WaitForExitAsync(cts.Token);
 
                 if (!string.IsNullOrEmpty(output))
                 {
@@ -675,7 +703,9 @@ public class OllamaManager : IDisposable
                 try
                 {
                     var processPath = process.MainModule?.FileName;
-                    if (processPath != null && processPath.Equals(_ollamaExePath, StringComparison.OrdinalIgnoreCase))
+                    // プロセスパスが取得できた場合のみ比較
+                    if (!string.IsNullOrEmpty(processPath) &&
+                        processPath.Equals(_ollamaExePath, StringComparison.OrdinalIgnoreCase))
                     {
                         try
                         {
@@ -688,17 +718,44 @@ public class OllamaManager : IDisposable
                         process.Kill(true);
                         process.WaitForExit(2000);
                     }
-                    process.Dispose();
                 }
-                catch
+                catch (InvalidOperationException)
                 {
-                    // プロセスが既に終了している場合やアクセスできない場合は無視
+                    // プロセスが既に終了している場合
+                }
+                catch (System.ComponentModel.Win32Exception)
+                {
+                    // アクセス権限がない場合
+                }
+                catch (Exception ex)
+                {
+                    // 予期しないエラーはログに記録
+                    try
+                    {
+                        _logMessage($"孤立プロセス終了中のエラー (PID: {process.Id}): {ex.Message}");
+                    }
+                    catch
+                    {
+                        // ログ出力が失敗しても続行
+                    }
+                }
+                finally
+                {
+                    process.Dispose();
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // 孤立プロセスのクリーンアップ失敗は無視
+            // 孤立プロセスのクリーンアップ失敗時も具体的なエラーを記録
+            try
+            {
+                _logMessage($"孤立Ollamaプロセス取得エラー: {ex.Message}");
+            }
+            catch
+            {
+                // ログ出力が失敗しても無視
+            }
         }
     }
 }
