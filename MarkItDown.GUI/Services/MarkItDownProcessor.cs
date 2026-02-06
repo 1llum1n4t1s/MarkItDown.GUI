@@ -88,15 +88,23 @@ public class MarkItDownProcessor
                 if (process != null)
                 {
                     var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                    process.WaitForExit(TimeoutSettings.MarkItDownCheckTimeoutMs);
+
+                    // ReadToEnd を WaitForExit より先に呼ぶ（逆にするとバッファ満杯時にデッドロックする）
+                    var output = process.StandardOutput.ReadToEnd();
+                    var error = process.StandardError.ReadToEnd();
+
+                    var exited = process.WaitForExit(TimeoutSettings.MarkItDownCheckTimeoutMs);
                     stopwatch.Stop();
 
                     _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
-                        
-                    // プロセス終了後に出力を読み取る
-                    var output = process.StandardOutput.ReadToEnd();
-                    var error = process.StandardError.ReadToEnd();
-                        
+
+                    if (!exited)
+                    {
+                        _logMessage("MarkItDownライブラリチェックがタイムアウトしました。プロセスを強制終了します。");
+                        try { process.Kill(true); } catch { /* プロセスが既に終了している場合は無視 */ }
+                        return false;
+                    }
+
                     if (!string.IsNullOrEmpty(output))
                     {
                         _logMessage($"Python出力:\n{output}");
@@ -105,7 +113,7 @@ public class MarkItDownProcessor
                     {
                         _logMessage($"Pythonエラー:\n{error}");
                     }
-                        
+
                     if (process.ExitCode == 0)
                     {
                         _logMessage("MarkItDownライブラリチェック完了 - 利用可能");
@@ -227,13 +235,22 @@ public class MarkItDownProcessor
                 
                 process.BeginOutputReadLine();
                 process.BeginErrorReadLine();
-                
+
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                process.WaitForExit(TimeoutSettings.FileConversionTimeoutMs);
+                var exited = process.WaitForExit(TimeoutSettings.FileConversionTimeoutMs);
                 stopwatch.Stop();
 
                 _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
-                _logMessage($"Pythonスクリプト実行完了 - 終了コード: {process.ExitCode}");
+
+                if (!exited)
+                {
+                    _logMessage("ファイル変換がタイムアウトしました。プロセスを強制終了します。");
+                    try { process.Kill(true); } catch { /* プロセスが既に終了している場合は無視 */ }
+                }
+                else
+                {
+                    _logMessage($"Pythonスクリプト実行完了 - 終了コード: {process.ExitCode}");
+                }
             }
             else
             {

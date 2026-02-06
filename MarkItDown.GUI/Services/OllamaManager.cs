@@ -553,7 +553,6 @@ public class OllamaManager : IDisposable
             var startInfo = new ProcessStartInfo
             {
                 FileName = _ollamaExePath,
-                Arguments = $"pull {modelName}",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
@@ -561,14 +560,22 @@ public class OllamaManager : IDisposable
                 WorkingDirectory = Path.GetDirectoryName(_ollamaExePath)
             };
 
+            // ArgumentList を使用してコマンドインジェクションを防止
+            startInfo.ArgumentList.Add("pull");
+            startInfo.ArgumentList.Add(modelName);
+
             using var process = Process.Start(startInfo);
             if (process != null)
             {
-                var output = await process.StandardOutput.ReadToEndAsync();
-                var error = await process.StandardError.ReadToEndAsync();
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
 
-                using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(10));
+                // ReadToEndAsync と WaitForExitAsync を並列実行してデッドロックを回避
+                var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
+                var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
                 await process.WaitForExitAsync(cts.Token);
+
+                var output = await outputTask;
+                var error = await errorTask;
 
                 if (!string.IsNullOrEmpty(output))
                 {
