@@ -303,8 +303,8 @@ public class OllamaManager : IDisposable
 
                 var totalBytes = response.Content.Headers.ContentLength ?? 0;
 
-                // ダウンロードサイズの上限チェック（1GB以上は拒否）
-                const long MaxDownloadSize = 1024L * 1024L * 1024L; // 1GB
+                // ダウンロードサイズの上限チェック（2GB以上は拒否）
+                const long MaxDownloadSize = 2L * 1024L * 1024L * 1024L; // 2GB
 
                 if (totalBytes <= 0)
                 {
@@ -312,7 +312,7 @@ public class OllamaManager : IDisposable
                 }
                 else if (totalBytes > MaxDownloadSize)
                 {
-                    _logMessage($"エラー: ダウンロードサイズが大きすぎます（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
+                    _logMessage($"エラー: ダウンロードサイズが大きすぎます（{totalBytes / 1024.0 / 1024.0 / 1024.0:F2}GB > 2GB）");
                     throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                 }
                 else

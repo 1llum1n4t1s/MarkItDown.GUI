@@ -33,7 +33,7 @@ public class PythonPackageManager
         try
         {
             CheckAndUnifyMarkItDownInstallation();
-            CheckAndInstallRequestsPackage();
+            CheckAndInstallOpenAIPackage();
         }
         catch (Exception ex)
         {
@@ -42,24 +42,24 @@ public class PythonPackageManager
     }
 
     /// <summary>
-    /// requestsパッケージの状態をチェックしてインストールする
+    /// openaiパッケージの状態をチェックしてインストールする（MarkItDownのネイティブLLM統合に必要）
     /// </summary>
-    private void CheckAndInstallRequestsPackage()
+    private void CheckAndInstallOpenAIPackage()
     {
         try
         {
-            if (!CheckPackageInstalled("requests"))
+            if (!CheckPackageInstalled("openai"))
             {
-                _logMessage("requestsパッケージが不足しているのでpipでインストールするのだ");
-                InstallPackageWithPip("requests");
+                _logMessage("openaiパッケージが不足しているのでpipでインストールするのだ");
+                InstallPackageWithPip("openai");
                 return;
             }
 
-            _logMessage("requestsパッケージはインストール済みなのだ");
+            _logMessage("openaiパッケージはインストール済みなのだ");
         }
         catch (Exception ex)
         {
-            _logMessage($"requests確認処理でエラー: {ex.Message}");
+            _logMessage($"openai確認処理でエラー: {ex.Message}");
         }
     }
 

@@ -3,146 +3,139 @@ import sys
 import json
 import traceback
 from datetime import datetime
-import base64
 import asyncio
-import urllib.request
-import urllib.error
 
 # グローバル定数（毎回の再生成を回避）
 SUPPORTED_EXTENSIONS = {
     '.txt', '.md', '.html', '.htm', '.csv', '.json', '.xml',
     '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
-    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif',
+    '.pdf',
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp',
     '.mp3', '.wav', '.flac', '.aac', '.ogg',
     '.zip', '.rar', '.7z', '.tar', '.gz'
 }
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'}
 
-# 画像サイズ上限（3MB）- 大画像のBase64エンコード時間削減
-MAX_IMAGE_SIZE_MB = 3
+# LLMによるMarkdown整形の対象となるファイル形式
+LLM_REFINABLE_EXTENSIONS = {'.pdf', '.pptx', '.ppt', '.docx', '.doc'}
 
 def log_message(message):
     print(message, flush=True)
 
+def create_openai_client(ollama_url):
+    """OllamaのOpenAI互換クライアントを作成する。"""
+    try:
+        from openai import OpenAI
+        client = OpenAI(
+            base_url=f"{ollama_url}/v1",
+            api_key="ollama"
+        )
+        log_message(f'OpenAIクライアント作成: {ollama_url}/v1')
+        return client
+    except ImportError:
+        log_message('openaiパッケージが利用できません。')
+        return None
+    except Exception as e:
+        log_message(f'OpenAIクライアント作成に失敗: {e}')
+        return None
+
+def create_markitdown_instance(ollama_client, ollama_model):
+    """MarkItDownインスタンスを作成する。Ollama設定があればネイティブLLM統合を使用する。"""
+    import markitdown
+
+    if ollama_client and ollama_model:
+        try:
+            md = markitdown.MarkItDown(
+                llm_client=ollama_client,
+                llm_model=ollama_model,
+                llm_prompt="この画像について詳しく説明してください。画像の内容、オブジェクト、色、雰囲気などを含めて説明してください。日本語で回答してください。"
+            )
+            log_message(f'MarkItDownインスタンス作成（Ollama統合有効、モデル: {ollama_model}）')
+            return md
+        except Exception as e:
+            log_message(f'Ollama統合の初期化に失敗: {e}。LLM統合なしで続行します。')
+
+    md = markitdown.MarkItDown()
+    log_message('MarkItDownインスタンス作成（LLM統合なし）')
+    return md
+
+def refine_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_name):
+    """Ollamaを使って崩れたMarkdownテキストを整形する。"""
+    if not ollama_client or not ollama_model:
+        return raw_markdown
+
+    try:
+        log_message(f'LLMでMarkdown整形開始: {file_name}')
+
+        response = ollama_client.chat.completions.create(
+            model=ollama_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "あなたはドキュメント整形の専門家です。"
+                        "入力されたテキストは、PDFなどから抽出された構造が崩れたテキストです。"
+                        "以下のルールに従って、きれいなMarkdown形式に整形してください。\n\n"
+                        "ルール:\n"
+                        "- 表形式のデータはMarkdownテーブル（| col1 | col2 |）に変換する\n"
+                        "- ラベルと値のペア（例: 発注番号 XXX）は定義リストまたは表にまとめる\n"
+                        "- 見出しには適切なMarkdownヘッダー（#, ##）を付ける\n"
+                        "- 元のテキストの情報を勝手に追加・削除・変更しない\n"
+                        "- 整形結果のMarkdownだけを出力する（説明文は不要）"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": raw_markdown
+                }
+            ],
+            timeout=300
+        )
+
+        refined = response.choices[0].message.content
+        if refined and len(refined.strip()) > 0:
+            log_message(f'LLM整形完了: {len(raw_markdown)}文字 → {len(refined)}文字')
+            return refined
+        else:
+            log_message('LLM整形の結果が空でした。元のテキストを使用します。')
+            return raw_markdown
+
+    except Exception as e:
+        log_message(f'LLM整形エラー: {e}。元のテキストを使用します。')
+        return raw_markdown
+
 try:
     log_message('Pythonスクリプト開始')
-    
+
     # Get application directory
     app_dir = os.path.dirname(os.path.abspath(__file__))
     log_message('Application directory: ' + app_dir)
-    
+
     # Ollama設定を環境変数から取得
     ollama_url = os.environ.get('OLLAMA_URL')
     ollama_model = os.environ.get('OLLAMA_MODEL')
-    
+
     if ollama_url and ollama_model:
         log_message(f'Ollama設定が検出されました: {ollama_url}, モデル: {ollama_model}')
     else:
         log_message('Ollama設定が見つかりません。画像説明機能は無効です。')
 
-    def generate_image_description_with_ollama_sync(image_path, ollama_url, ollama_model):
-        """Ollamaを使用して画像の説明を生成する（同期版、executorで実行、サイズ上限あり）"""
-        try:
-            log_message(f'Ollamaで画像説明を生成中: {image_path}')
-
-            # 画像ファイルの存在確認
-            if not os.path.exists(image_path):
-                log_message(f'画像ファイルが見つかりません: {image_path}')
-                return None
-
-            # 画像をBase64エンコード（サイズ上限チェック付き）
-            try:
-                with open(image_path, 'rb') as img_file:
-                    image_bytes = img_file.read()
-                    image_size_mb = len(image_bytes) / (1024 * 1024)
-
-                    # 画像サイズ上限をチェック（メモリとエンコード時間を節約）
-                    if image_size_mb > MAX_IMAGE_SIZE_MB:
-                        log_message(f'スキップ: 画像サイズが上限を超えています（{image_size_mb:.2f} MB > {MAX_IMAGE_SIZE_MB} MB）')
-                        return None
-
-                    image_data = base64.b64encode(image_bytes).decode('utf-8')
-
-                log_message(f'画像をBase64エンコードしました（元サイズ: {image_size_mb:.2f} MB, Base64: {len(image_data)}文字）')
-
-            except Exception as e:
-                log_message(f'画像の読み込みに失敗: {e}')
-                return None
-
-            # Ollama APIにリクエスト
-            api_url = f"{ollama_url}/api/generate"
-            payload = {
-                "model": ollama_model,
-                "prompt": "この画像について詳しく説明してください。画像の内容、オブジェクト、色、雰囲気などを含めて説明してください。日本語で回答してください。",
-                "images": [image_data],
-                "stream": False
-            }
-
-            ollama_timeout_sec = 900
-            log_message(f'Ollama APIリクエスト送信: {api_url}')
-            log_message(f'モデル: {ollama_model}')
-            log_message(f'画像説明を生成中... (最大{ollama_timeout_sec // 60}分かかる場合があります)')
-
-            try:
-                # requestsライブラリが利用可能な場合
-                import requests
-                response = requests.post(api_url, json=payload, timeout=ollama_timeout_sec)
-                log_message(f'レスポンス受信: ステータスコード {response.status_code}')
-
-                if response.status_code == 200:
-                    try:
-                        result = response.json()
-                        log_message(f'Ollama APIレスポンス: {result}')
-                        description = result.get('response', '')
-                        if description:
-                            log_message(f'Ollamaから説明を取得しました（{len(description)}文字）')
-                            return description
-                        else:
-                            log_message('Ollamaからの応答が空でした')
-                            log_message(f'レスポンス内容: {result}')
-                            return None
-                    except Exception as e:
-                        log_message(f'レスポンスのパースに失敗: {e}')
-                        log_message(f'生のレスポンス: {response.text[:500]}')
-                        return None
-                else:
-                    log_message(f'Ollama APIエラー: ステータスコード {response.status_code}')
-                    log_message(f'エラー内容: {response.text[:500]}')
-                    return None
-
-            except ImportError:
-                log_message('requestsライブラリが利用できません。画像説明生成をスキップします。')
-                return None
-            except Exception as e:
-                # requestsライブラリのTimeoutError検出
-                error_name = type(e).__name__
-                if error_name in ('TimeoutError', 'Timeout', 'ConnectTimeout', 'ReadTimeout', 'HTTPError'):
-                    log_message(f'Ollama APIタイムアウト（{ollama_timeout_sec}秒/{ollama_timeout_sec // 60}分）')
-                    log_message('画像が大きすぎるか、モデルの処理に時間がかかっています')
-                else:
-                    log_message(f'Ollama APIリクエストエラー ({error_name}): {e}')
-                return None
-
-        except Exception as e:
-            log_message(f'Ollama画像説明生成エラー: {e}')
-            import traceback
-            log_message(f'スタックトレース: {traceback.format_exc()}')
-            return None
-
-    async def process_file_with_ollama_async(md, file_path, ollama_url, ollama_model):
-        """Single file conversion with async Ollama support"""
+    async def process_file_async(md, file_path, ollama_client=None, ollama_model=None):
+        """ファイルをMarkItDownで変換する。PDF等の構造化ドキュメントはOllamaで整形する。"""
         try:
             file_name = os.path.basename(file_path)
             file_dir = os.path.dirname(file_path)
             name_without_ext = os.path.splitext(file_name)[0]
+            file_ext = os.path.splitext(file_path)[1].lower()
 
             log_message(f'ファイル処理開始: {file_path}')
             log_message(f'ファイル名: {file_name}')
 
-            # Convert file using MarkItDown
+            # Convert file using MarkItDown (LLM統合が有効ならば画像説明も自動生成)
             try:
-                result = md.convert(file_path)
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(None, md.convert, file_path)
                 markdown_content = result.text_content
                 log_message(f'変換完了、コンテンツ長: {len(markdown_content)}文字')
             except Exception as convert_error:
@@ -150,7 +143,16 @@ try:
                 traceback.print_exc()
                 raise
 
-            # 画像ファイルの場合、変換結果が空になることがあるため、ファイル情報を追加
+            # PDF等の構造化ドキュメントの場合、OllamaでMarkdown整形を行う
+            if (markdown_content and len(markdown_content.strip()) > 0
+                    and file_ext in LLM_REFINABLE_EXTENSIONS
+                    and ollama_client and ollama_model):
+                markdown_content = await loop.run_in_executor(
+                    None, refine_markdown_with_llm,
+                    ollama_client, ollama_model, markdown_content, file_name
+                )
+
+            # 変換結果が空の場合、ファイル情報を追加
             if not markdown_content or len(markdown_content.strip()) == 0:
                 log_message(f'警告: 変換結果が空です。ファイル情報を追加します。')
 
@@ -163,24 +165,9 @@ try:
                     markdown_content += f"- ファイルパス: `{file_path}`\n"
                     markdown_content += f"- ファイルサイズ: {file_size:,} バイト\n"
                     markdown_content += f"- 拡張子: {file_ext}\n\n"
-
-                    # Ollamaで画像説明を試みる（スレッドプール実行）
-                    if ollama_url and ollama_model:
-                        log_message('Ollamaで画像説明を生成します...')
-                        loop = asyncio.get_running_loop()
-                        description = await loop.run_in_executor(None, generate_image_description_with_ollama_sync, file_path, ollama_url, ollama_model)
-                        if description:
-                            markdown_content += f"## 画像の説明 (Ollama {ollama_model})\n\n"
-                            markdown_content += f"{description}\n\n"
-                        else:
-                            markdown_content += "注: Ollamaでの画像説明生成に失敗しました。\n\n"
-
                     markdown_content += f"![{file_name}]({file_path})\n\n"
-
-                    if not ollama_url or not ollama_model:
-                        markdown_content += "注: この画像にはテキスト情報が含まれていないか、OCR処理でテキストが検出されませんでした。\n"
-                        markdown_content += "画像の内容を説明するには、Ollama (llava モデル推奨) を使用してください。\n"
-
+                    markdown_content += "注: この画像にはテキスト情報が含まれていないか、OCR処理でテキストが検出されませんでした。\n"
+                    markdown_content += "画像の内容を説明するには、Ollama (llava モデル推奨) を使用してください。\n"
                     log_message(f'画像ファイル情報を追加しました')
                 else:
                     markdown_content = f"# {file_name}\n\n変換結果が空でした。\n"
@@ -247,11 +234,15 @@ try:
             import markitdown
             log_message('MarkItDown library imported successfully')
 
-            # Create a single MarkItDown instance to reuse
+            # OpenAIクライアントを作成（MarkItDownとLLM整形の両方で再利用）
+            ollama_client = None
+            if ollama_url and ollama_model:
+                ollama_client = create_openai_client(ollama_url)
+
+            # Create a single MarkItDown instance to reuse (Ollama統合含む)
             log_message('MarkItDownインスタンスを作成中...')
             try:
-                md = markitdown.MarkItDown()
-                log_message('MarkItDown instance created')
+                md = create_markitdown_instance(ollama_client, ollama_model)
             except Exception as e:
                 log_message(f'MarkItDownインスタンス作成エラー: {e}')
                 raise
@@ -261,7 +252,7 @@ try:
                 log_message(f'ファイル処理開始（最大3並列処理）')
                 for i in range(0, len(file_paths), 3):
                     batch = file_paths[i:i+3]
-                    batch_tasks = [process_file_with_ollama_async(md, file_path, ollama_url, ollama_model) for file_path in batch]
+                    batch_tasks = [process_file_async(md, file_path, ollama_client, ollama_model) for file_path in batch]
                     batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
                     for result in batch_results:
                         if isinstance(result, Exception):
@@ -270,73 +261,36 @@ try:
                         else:
                             results.append(result)
 
-            # フォルダの処理
+            # フォルダの処理（process_file_asyncを再利用）
             for folder_path in folder_paths:
                 log_message(f'フォルダ処理開始: {folder_path}')
                 if os.path.exists(folder_path):
                     try:
                         folder_name = os.path.basename(folder_path)
-                        converted_count = 0
+
+                        # フォルダ内のサポート対象ファイルを収集
+                        folder_file_paths = []
                         for root, dirs, files in os.walk(folder_path, followlinks=False):
                             for file in files:
-                                file_path = os.path.join(root, file)
-                                try:
-                                    file_ext = os.path.splitext(file)[1].lower()
+                                file_ext = os.path.splitext(file)[1].lower()
+                                if file_ext in SUPPORTED_EXTENSIONS:
+                                    folder_file_paths.append(os.path.join(root, file))
+                                else:
+                                    log_message(f'サポートされていないファイル形式: {file}')
 
-                                    log_message(f'フォルダ内ファイル: {file} (拡張子: {file_ext})')
+                        log_message(f'フォルダ内対象ファイル数: {len(folder_file_paths)}')
 
-                                    if file_ext in SUPPORTED_EXTENSIONS:
-                                        log_message(f'Supported file format: {file}')
-                                        try:
-                                            result = md.convert(file_path)
-                                            markdown_content = result.text_content
-
-                                            if not markdown_content or len(markdown_content.strip()) == 0:
-                                                log_message(f'警告: フォルダ内ファイルの変換結果が空です。ファイル情報を追加します: {file}')
-
-                                                if file_ext in IMAGE_EXTENSIONS:
-                                                    file_size = os.path.getsize(file_path)
-                                                    markdown_content = f"# {file}\n\n"
-                                                    markdown_content += f"画像ファイル: `{file}`\n\n"
-                                                    markdown_content += f"- ファイルパス: `{file_path}`\n"
-                                                    markdown_content += f"- ファイルサイズ: {file_size:,} バイト\n"
-                                                    markdown_content += f"- 拡張子: {file_ext}\n\n"
-
-                                                    if ollama_url and ollama_model:
-                                                        log_message(f'Ollamaで画像説明を生成します: {file}')
-                                                        loop = asyncio.get_running_loop()
-                                                        description = await loop.run_in_executor(None, generate_image_description_with_ollama_sync, file_path, ollama_url, ollama_model)
-                                                        if description:
-                                                            markdown_content += f"## 画像の説明 (Ollama {ollama_model})\n\n"
-                                                            markdown_content += f"{description}\n\n"
-                                                        else:
-                                                            markdown_content += "注: Ollamaでの画像説明生成に失敗しました。\n\n"
-
-                                                    markdown_content += f"![{file}]({file_path})\n\n"
-
-                                                    if not ollama_url or not ollama_model:
-                                                        markdown_content += "注: この画像にはテキスト情報が含まれていないか、OCR処理でテキストが検出されませんでした。\n"
-                                                        markdown_content += "画像の内容を説明するには、Ollama (llava モデル推奨) を使用してください。\n"
-                                                else:
-                                                    markdown_content = f"# {file}\n\n変換結果が空でした。\n"
-
-                                            timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-                                            name_without_ext = os.path.splitext(file)[0]
-                                            output_filename = f'{name_without_ext}_{timestamp}.md'
-                                            output_path = os.path.join(root, output_filename)
-
-                                            with open(output_path, 'w', encoding='utf-8') as f:
-                                                f.write(markdown_content)
-
-                                            converted_count += 1
-                                            log_message(f'フォルダ内ファイルを変換: {file} → {output_filename} (コンテンツ長: {len(markdown_content)}文字)')
-                                        except Exception as e:
-                                            log_message(f'フォルダ内ファイル変換エラー: {file} - {str(e)}')
-                                    else:
-                                        log_message(f'サポートされていないファイル形式: {file}')
-
-                                except Exception as e:
-                                    log_message(f'フォルダ内ファイル処理エラー: {file} - {str(e)}')
+                        # バッチ並列処理（最大3並列）
+                        converted_count = 0
+                        for i in range(0, len(folder_file_paths), 3):
+                            batch = folder_file_paths[i:i+3]
+                            batch_tasks = [process_file_async(md, fp, ollama_client, ollama_model) for fp in batch]
+                            batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
+                            for r in batch_results:
+                                if isinstance(r, Exception):
+                                    log_message(f'フォルダ内ファイル処理エラー: {r}')
+                                else:
+                                    converted_count += 1
 
                         results.append(f'フォルダ処理完了: {folder_name} (変換: {converted_count}個)')
 
