@@ -281,7 +281,7 @@ public sealed class WebScraperService : IDisposable
                 root.TryGetProperty("content", out var content) &&
                 content.ValueKind == JsonValueKind.Array)
             {
-                return await FormatSinglePageLargeJsonAsync(root, ct);
+                return await FormatSinglePageLargeJsonAsync(root, content, ct);
             }
 
             // その他の場合は分割せずにそのまま送信（サイズ制限超えでも試行）
@@ -352,18 +352,59 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// 大きな単一ページJSONを整形する（全体を一括送信）
+    /// 単一ページJSONのcontent配列を要素ごとに分割して整形する
     /// </summary>
-    private async Task<string?> FormatSinglePageLargeJsonAsync(JsonElement root, CancellationToken ct)
+    private async Task<string?> FormatSinglePageLargeJsonAsync(
+        JsonElement root, JsonElement contentArray, CancellationToken ct)
     {
-        _logMessage("単一ページの大きなJSONを整形中...");
         var jsonOptions = new JsonSerializerOptions
         {
             WriteIndented = true,
             Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
         };
-        var json = JsonSerializer.Serialize(root, jsonOptions);
-        return await FormatJsonChunkWithOllamaAsync(json, ct);
+
+        var formattedItems = new List<JsonElement>();
+        var itemCount = contentArray.GetArrayLength();
+
+        for (var i = 0; i < itemCount; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            _logMessage($"content要素 {i + 1}/{itemCount} を整形中...");
+
+            var itemJson = JsonSerializer.Serialize(contentArray[i], jsonOptions);
+            var formatted = await FormatJsonChunkWithOllamaAsync(itemJson, ct);
+
+            if (!string.IsNullOrWhiteSpace(formatted))
+            {
+                try
+                {
+                    formattedItems.Add(JsonSerializer.Deserialize<JsonElement>(formatted));
+                    continue;
+                }
+                catch (JsonException)
+                {
+                    _logMessage($"content要素 {i + 1} の整形結果が無効なJSONのため、元データを使用します。");
+                }
+            }
+            // 整形失敗時は元のデータを保持
+            formattedItems.Add(contentArray[i]);
+        }
+
+        // トップレベル構造を再構築
+        var resultDict = new Dictionary<string, object>();
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.Name == "content")
+            {
+                resultDict["content"] = formattedItems;
+            }
+            else
+            {
+                resultDict[prop.Name] = prop.Value;
+            }
+        }
+
+        return JsonSerializer.Serialize(resultDict, jsonOptions);
     }
 
     /// <summary>
