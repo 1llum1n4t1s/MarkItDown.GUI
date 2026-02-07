@@ -153,7 +153,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
             UpdateProcessingStatus("Pythonパッケージを確認中...");
             var pythonPackageManager = new PythonPackageManager(pythonExe, LogMessage);
-            pythonPackageManager.InstallMarkItDownPackage();
+            await pythonPackageManager.InstallMarkItDownPackageAsync();
 
             UpdateProcessingStatus("MarkItDownライブラリを準備中...");
             var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, ollamaUrl, ollamaModel);
