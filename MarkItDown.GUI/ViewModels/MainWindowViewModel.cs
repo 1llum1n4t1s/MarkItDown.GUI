@@ -159,8 +159,8 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, ollamaUrl, ollamaModel);
             _fileProcessor = new FileProcessor(markItDownProcessor, LogMessage);
 
-            _webScraperService = new WebScraperService(LogMessage);
-            var playwrightScraper = new PlaywrightScraperService(pythonExe, LogMessage);
+            _webScraperService = new WebScraperService(LogMessage, UpdateProcessingStatus);
+            var playwrightScraper = new PlaywrightScraperService(pythonExe, LogMessage, UpdateProcessingStatus);
 
             // Ollama が利用可能な場合、Playwright/WebScraper に設定を渡す
             if (_ollamaManager is { IsOllamaAvailable: true })

@@ -15,14 +15,16 @@ public sealed class PlaywrightScraperService
 {
     private readonly string _pythonExecutablePath;
     private readonly Action<string> _logMessage;
+    private readonly Action<string>? _statusCallback;
     private bool _dependenciesInstalled;
     private string? _ollamaUrl;
     private string? _ollamaModel;
 
-    public PlaywrightScraperService(string pythonExecutablePath, Action<string> logMessage)
+    public PlaywrightScraperService(string pythonExecutablePath, Action<string> logMessage, Action<string>? statusCallback = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
+        _statusCallback = statusCallback;
     }
 
     /// <summary>
@@ -41,6 +43,8 @@ public sealed class PlaywrightScraperService
     public async Task EnsureDependenciesInstalledAsync(CancellationToken ct = default)
     {
         if (_dependenciesInstalled) return;
+
+        _statusCallback?.Invoke("依存パッケージを確認中...");
 
         // playwright パッケージチェック・更新
         if (!await CheckPackageInstalledAsync("playwright", ct))
@@ -85,6 +89,7 @@ public sealed class PlaywrightScraperService
             throw new FileNotFoundException($"スクレイピングスクリプトが見つかりません: {scriptPath}");
         }
 
+        _statusCallback?.Invoke("Playwright でページを読み込み中...");
         _logMessage($"Playwright スクレイピング開始: {url}");
 
         var startInfo = new ProcessStartInfo

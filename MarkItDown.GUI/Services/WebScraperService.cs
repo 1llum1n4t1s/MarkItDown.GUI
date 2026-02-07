@@ -20,12 +20,14 @@ public sealed class WebScraperService : IDisposable
     private readonly HttpClient _httpClient;
     private readonly HttpClient _ollamaClient;
     private readonly Action<string> _logMessage;
+    private readonly Action<string>? _statusCallback;
     private PlaywrightScraperService? _playwrightScraper;
     private string? _ollamaUrl;
     private string? _ollamaModel;
 
-    public WebScraperService(Action<string> logMessage)
+    public WebScraperService(Action<string> logMessage, Action<string>? statusCallback = null)
     {
+        _statusCallback = statusCallback;
         _logMessage = logMessage;
         var handler = new SocketsHttpHandler
         {
@@ -78,6 +80,7 @@ public sealed class WebScraperService : IDisposable
         if (siteType == SiteType.Reddit)
         {
             // Reddit は JSON API で取得 → C# 側で処理
+            _statusCallback?.Invoke("Reddit API からデータを取得中...");
             var result = await ScrapeRedditAsync(url, ct);
             var options = new JsonSerializerOptions
             {
@@ -97,12 +100,15 @@ public sealed class WebScraperService : IDisposable
             }
 
             // Playwright + Ollama ガイド型でスクレイピング
+            _statusCallback?.Invoke("Playwright でスクレイピング中...");
             _logMessage("Playwright + Ollama ガイド型でスクレイピングします...");
             await _playwrightScraper.ScrapeWithBrowserAsync(url, outputPath, ct);
         }
 
         // Ollama で JSON を整形する
         await FormatJsonWithOllamaAsync(outputPath, ct);
+
+        _statusCallback?.Invoke("スクレイピング完了");
     }
 
     /// <summary>
@@ -189,6 +195,7 @@ public sealed class WebScraperService : IDisposable
 
         try
         {
+            _statusCallback?.Invoke("Ollama でJSON整形中...");
             _logMessage("Ollama でJSON整形を開始します...");
             var rawJson = await File.ReadAllTextAsync(jsonFilePath, System.Text.Encoding.UTF8, ct);
 
@@ -262,6 +269,7 @@ public sealed class WebScraperService : IDisposable
     /// </summary>
     private async Task<string?> FormatLargeJsonWithOllamaAsync(string rawJson, CancellationToken ct)
     {
+        _statusCallback?.Invoke("JSONをチャンク分割で整形中...");
         _logMessage("JSONが大きいため、チャンク分割で整形します...");
 
         try
@@ -313,6 +321,7 @@ public sealed class WebScraperService : IDisposable
         for (var i = 0; i < pageCount; i++)
         {
             ct.ThrowIfCancellationRequested();
+            _statusCallback?.Invoke($"ページ {i + 1}/{pageCount} を整形中...");
             _logMessage($"ページ {i + 1}/{pageCount} を整形中...");
 
             var pageJson = JsonSerializer.Serialize(pages[i], jsonOptions);
@@ -369,6 +378,7 @@ public sealed class WebScraperService : IDisposable
         for (var i = 0; i < itemCount; i++)
         {
             ct.ThrowIfCancellationRequested();
+            _statusCallback?.Invoke($"content要素 {i + 1}/{itemCount} を整形中...");
             _logMessage($"content要素 {i + 1}/{itemCount} を整形中...");
 
             var itemJson = JsonSerializer.Serialize(contentArray[i], jsonOptions);
