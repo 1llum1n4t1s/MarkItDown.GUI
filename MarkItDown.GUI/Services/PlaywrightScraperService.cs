@@ -193,12 +193,23 @@ public sealed class PlaywrightScraperService
 
         var outputSb = new StringBuilder();
         var errorSb = new StringBuilder();
-        process.OutputDataReceived += (_, e) => { if (e.Data is not null) outputSb.AppendLine(e.Data); };
-        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) errorSb.AppendLine(e.Data); };
+        var outputTcs = new TaskCompletionSource();
+        var errorTcs = new TaskCompletionSource();
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not null) outputSb.AppendLine(e.Data);
+            else outputTcs.TrySetResult();
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is not null) errorSb.AppendLine(e.Data);
+            else errorTcs.TrySetResult();
+        };
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
         await process.WaitForExitAsync(ct);
+        await Task.WhenAll(outputTcs.Task, errorTcs.Task);
 
         var output = outputSb.ToString();
         var error = errorSb.ToString();
