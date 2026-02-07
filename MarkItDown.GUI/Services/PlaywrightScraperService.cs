@@ -134,13 +134,21 @@ public sealed class PlaywrightScraperService
         process.BeginOutputReadLine();
         process.BeginErrorReadLine();
 
-        // タイムアウト付きで待機
-        var exited = await Task.Run(() => process.WaitForExit(TimeoutSettings.PlaywrightScrapeTimeoutMs), ct);
-
-        if (!exited)
+        // タイムアウトとキャンセルトークン付きで待機
+        try
         {
-            _logMessage("スクレイピングがタイムアウトしました。プロセスを強制終了します。");
-            try { process.Kill(true); } catch { /* already exited */ }
+            using var timeoutCts = new CancellationTokenSource(TimeoutSettings.PlaywrightScrapeTimeoutMs);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, timeoutCts.Token);
+            await process.WaitForExitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                _logMessage("スクレイピングがタイムアウトまたはキャンセルされました。プロセスを強制終了します。");
+                try { process.Kill(true); } catch { /* already exited */ }
+            }
+            if (ct.IsCancellationRequested) throw;
             throw new TimeoutException("Playwright スクレイピングがタイムアウトしました");
         }
 
