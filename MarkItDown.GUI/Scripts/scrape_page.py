@@ -18,10 +18,21 @@ import base64
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import traceback
 from urllib.parse import urljoin, urlparse
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
 
 
 def log(msg: str):
@@ -31,7 +42,6 @@ def log(msg: str):
 def install_playwright_browsers():
     """Playwright のブラウザバイナリをインストールする (chromium のみ)"""
     log("Playwright ブラウザをインストール中...")
-    import subprocess
     result = subprocess.run(
         [sys.executable, "-m", "playwright", "install", "chromium"],
         capture_output=True, text=True, timeout=300
@@ -44,8 +54,9 @@ def install_playwright_browsers():
 
 def check_playwright_browsers() -> bool:
     """Playwright の chromium ブラウザが利用可能かチェックする"""
+    if sync_playwright is None:
+        return False
     try:
-        from playwright.sync_api import sync_playwright
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True)
             browser.close()
@@ -161,7 +172,8 @@ def generate_scraping_strategy(
     Ollama にページ構造を分析させ、スクレイピング戦略 JSON を返す。
     失敗時は例外を投げる。
     """
-    from openai import OpenAI
+    if OpenAI is None:
+        raise ImportError("openai パッケージがインストールされていません")
 
     client = OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama")
 
@@ -822,10 +834,8 @@ def main():
 
     log(f"Ollama: {ollama_url} / モデル: {ollama_model}")
 
-    # Playwright のインポート
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
+    # Playwright の利用可能性チェック
+    if sync_playwright is None:
         log("playwright がインストールされていません")
         sys.exit(2)
 

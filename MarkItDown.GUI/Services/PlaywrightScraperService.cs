@@ -172,6 +172,9 @@ public sealed class PlaywrightScraperService
         _logMessage($"Playwright スクレイピング完了: {outputPath}");
     }
 
+    /// <summary>
+    /// パッケージがインストールされているかチェックする（ProcessHelper 使用）
+    /// </summary>
     private async Task<bool> CheckPackageInstalledAsync(string packageName, CancellationToken ct)
     {
         var startInfo = new ProcessStartInfo
@@ -185,13 +188,14 @@ public sealed class PlaywrightScraperService
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add($"import {packageName}");
 
-        using var process = Process.Start(startInfo);
-        if (process is null) return false;
-
-        var exited = await Task.Run(() => process.WaitForExit(TimeoutSettings.PythonVersionCheckTimeoutMs), ct);
-        return exited && process.ExitCode == 0;
+        var (exitCode, _, _) = await ProcessUtils.RunAsync(
+            startInfo, TimeoutSettings.PythonVersionCheckTimeoutMs, ct);
+        return exitCode == 0;
     }
 
+    /// <summary>
+    /// pip でパッケージをインストール/更新する（ProcessHelper 使用）
+    /// </summary>
     private async Task InstallPackageAsync(string packageName, CancellationToken ct)
     {
         var startInfo = new ProcessStartInfo
@@ -210,42 +214,15 @@ public sealed class PlaywrightScraperService
         startInfo.ArgumentList.Add("--upgrade");
         startInfo.ArgumentList.Add(packageName);
 
-        using var process = Process.Start(startInfo);
-        if (process is null)
-        {
-            _logMessage($"{packageName} のインストール/更新プロセス起動に失敗");
-            return;
-        }
-
-        var outputSb = new StringBuilder();
-        var errorSb = new StringBuilder();
-        var outputTcs = new TaskCompletionSource();
-        var errorTcs = new TaskCompletionSource();
-        process.OutputDataReceived += (_, e) =>
-        {
-            if (e.Data is not null) outputSb.AppendLine(e.Data);
-            else outputTcs.TrySetResult();
-        };
-        process.ErrorDataReceived += (_, e) =>
-        {
-            if (e.Data is not null) errorSb.AppendLine(e.Data);
-            else errorTcs.TrySetResult();
-        };
-        process.BeginOutputReadLine();
-        process.BeginErrorReadLine();
-
-        await process.WaitForExitAsync(ct);
-        await Task.WhenAll(outputTcs.Task, errorTcs.Task);
-
-        var output = outputSb.ToString();
-        var error = errorSb.ToString();
+        var (exitCode, output, error) = await ProcessUtils.RunAsync(
+            startInfo, TimeoutSettings.PackageInstallTimeoutMs, ct);
 
         if (!string.IsNullOrEmpty(output))
             _logMessage($"pip: {output.TrimEnd()}");
-        if (!string.IsNullOrEmpty(error) && process.ExitCode != 0)
+        if (!string.IsNullOrEmpty(error) && exitCode != 0)
             _logMessage($"pip エラー: {error.TrimEnd()}");
 
-        if (process.ExitCode == 0)
+        if (exitCode == 0)
             _logMessage($"{packageName} のインストール/更新完了");
         else
             _logMessage($"{packageName} のインストール/更新に失敗しました");

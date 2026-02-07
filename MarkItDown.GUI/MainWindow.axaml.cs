@@ -112,8 +112,14 @@ public partial class MainWindow : Avalonia.Controls.Window
             return;
         }
 
+        if (StorageProvider is not { } storageProvider)
+        {
+            ViewModel.LogMessage("フォルダ選択機能がこのプラットフォームでは利用できません。");
+            return;
+        }
+
         // 保存先ディレクトリ選択ダイアログを表示
-        var folders = await StorageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        var folders = await storageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
         {
             Title = "保存先ディレクトリを選択",
             AllowMultiple = false
