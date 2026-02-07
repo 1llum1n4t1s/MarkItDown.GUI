@@ -1,6 +1,8 @@
 using System.Linq;
+using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Platform.Storage;
 using MarkItDown.GUI.ViewModels;
 
 namespace MarkItDown.GUI;
@@ -94,5 +96,44 @@ public partial class MainWindow : Avalonia.Controls.Window
 
         ViewModel.SetDropZoneDefault();
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// 抽出ボタンクリック時のハンドラー
+    /// </summary>
+    /// <param name="sender">イベントソース</param>
+    /// <param name="e">ルーティングイベント引数</param>
+    private async void ExtractButton_Click(object? sender, RoutedEventArgs e)
+    {
+        var url = ViewModel.UrlInput?.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            ViewModel.LogMessage("URLが入力されていません。");
+            return;
+        }
+
+        if (StorageProvider is not { } storageProvider)
+        {
+            ViewModel.LogMessage("フォルダ選択機能がこのプラットフォームでは利用できません。");
+            return;
+        }
+
+        // 保存先ディレクトリ選択ダイアログを表示
+        var folders = await storageProvider.OpenFolderPickerAsync(new FolderPickerOpenOptions
+        {
+            Title = "保存先ディレクトリを選択",
+            AllowMultiple = false
+        });
+
+        if (folders.Count == 0)
+        {
+            ViewModel.LogMessage("保存先ディレクトリが選択されませんでした。");
+            return;
+        }
+
+        var selectedFolder = folders[0].Path.LocalPath;
+        ViewModel.LogMessage($"保存先: {selectedFolder}");
+
+        await ViewModel.ExtractUrlAsync(selectedFolder);
     }
 }

@@ -5,9 +5,15 @@ import traceback
 from datetime import datetime
 import asyncio
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 # グローバル定数（毎回の再生成を回避）
+# .md / .json は出力形式と同一のため、フォルダスキャン時に自分の出力ファイルを再変換してしまうので除外
 SUPPORTED_EXTENSIONS = {
-    '.txt', '.md', '.html', '.htm', '.csv', '.json', '.xml',
+    '.txt', '.html', '.htm', '.csv', '.xml',
     '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt',
     '.pdf',
     '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp',
@@ -17,25 +23,22 @@ SUPPORTED_EXTENSIONS = {
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'}
 
-# LLMによるMarkdown整形の対象となるファイル形式
-LLM_REFINABLE_EXTENSIONS = {'.pdf', '.pptx', '.ppt', '.docx', '.doc'}
 
 def log_message(message):
     print(message, flush=True)
 
 def create_openai_client(ollama_url):
     """OllamaのOpenAI互換クライアントを作成する。"""
+    if OpenAI is None:
+        log_message('openaiパッケージが利用できません。')
+        return None
     try:
-        from openai import OpenAI
         client = OpenAI(
             base_url=f"{ollama_url}/v1",
             api_key="ollama"
         )
         log_message(f'OpenAIクライアント作成: {ollama_url}/v1')
         return client
-    except ImportError:
-        log_message('openaiパッケージが利用できません。')
-        return None
     except Exception as e:
         log_message(f'OpenAIクライアント作成に失敗: {e}')
         return None
@@ -74,14 +77,13 @@ def refine_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_nam
                 {
                     "role": "system",
                     "content": (
-                        "あなたはドキュメント整形の専門家です。"
-                        "入力されたテキストは、PDFなどから抽出された構造が崩れたテキストです。"
-                        "以下のルールに従って、きれいなMarkdown形式に整形してください。\n\n"
+                        "あなたはMarkdown整形アシスタントです。"
+                        "入力されたMarkdownテキストを読みやすく整えてください。\n\n"
                         "ルール:\n"
-                        "- 表形式のデータはMarkdownテーブル（| col1 | col2 |）に変換する\n"
-                        "- ラベルと値のペア（例: 発注番号 XXX）は定義リストまたは表にまとめる\n"
-                        "- 見出しには適切なMarkdownヘッダー（#, ##）を付ける\n"
-                        "- 元のテキストの情報を勝手に追加・削除・変更しない\n"
+                        "- 元のテキストの情報を絶対に追加・削除・変更・言い換えしない\n"
+                        "- 不要な連続空行を1行にまとめる\n"
+                        "- 壊れたMarkdown記法（閉じ忘れ、不正なリスト等）を修正する\n"
+                        "- 見出しレベル（#, ##, ###）の一貫性を保つ\n"
                         "- 整形結果のMarkdownだけを出力する（説明文は不要）"
                     )
                 },
@@ -143,9 +145,8 @@ try:
                 traceback.print_exc()
                 raise
 
-            # PDF等の構造化ドキュメントの場合、OllamaでMarkdown整形を行う
+            # OllamaでMarkdown整形を行う（全ファイル形式対象）
             if (markdown_content and len(markdown_content.strip()) > 0
-                    and file_ext in LLM_REFINABLE_EXTENSIONS
                     and ollama_client and ollama_model):
                 markdown_content = await loop.run_in_executor(
                     None, refine_markdown_with_llm,
