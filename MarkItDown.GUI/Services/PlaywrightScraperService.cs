@@ -146,7 +146,7 @@ public sealed class PlaywrightScraperService
             if (!process.HasExited)
             {
                 _logMessage("スクレイピングがタイムアウトまたはキャンセルされました。プロセスを強制終了します。");
-                try { process.Kill(true); } catch { /* already exited */ }
+                try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
             }
             if (ct.IsCancellationRequested) throw;
             throw new TimeoutException("Playwright スクレイピングがタイムアウトしました");

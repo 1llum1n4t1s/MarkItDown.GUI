@@ -101,7 +101,7 @@ public class MarkItDownProcessor
                     if (!exited)
                     {
                         _logMessage("MarkItDownライブラリチェックがタイムアウトしました。プロセスを強制終了します。");
-                        try { process.Kill(true); } catch { /* プロセスが既に終了している場合は無視 */ }
+                        try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
                         return false;
                     }
 
@@ -245,7 +245,7 @@ public class MarkItDownProcessor
                 if (!exited)
                 {
                     _logMessage("ファイル変換がタイムアウトしました。プロセスを強制終了します。");
-                    try { process.Kill(true); } catch { /* プロセスが既に終了している場合は無視 */ }
+                    try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
                 }
                 else
                 {

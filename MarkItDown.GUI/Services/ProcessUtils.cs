@@ -140,7 +140,7 @@ public static class ProcessUtils
         {
             if (!process.HasExited)
             {
-                try { process.Kill(true); } catch { /* already exited */ }
+                try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
             }
 
             if (ct.IsCancellationRequested)
