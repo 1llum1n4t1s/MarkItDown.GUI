@@ -5,6 +5,11 @@ import traceback
 from datetime import datetime
 import asyncio
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 # グローバル定数（毎回の再生成を回避）
 # .md / .json は出力形式と同一のため、フォルダスキャン時に自分の出力ファイルを再変換してしまうので除外
 SUPPORTED_EXTENSIONS = {
@@ -24,17 +29,16 @@ def log_message(message):
 
 def create_openai_client(ollama_url):
     """OllamaのOpenAI互換クライアントを作成する。"""
+    if OpenAI is None:
+        log_message('openaiパッケージが利用できません。')
+        return None
     try:
-        from openai import OpenAI
         client = OpenAI(
             base_url=f"{ollama_url}/v1",
             api_key="ollama"
         )
         log_message(f'OpenAIクライアント作成: {ollama_url}/v1')
         return client
-    except ImportError:
-        log_message('openaiパッケージが利用できません。')
-        return None
     except Exception as e:
         log_message(f'OpenAIクライアント作成に失敗: {e}')
         return None
