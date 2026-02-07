@@ -673,11 +673,13 @@ def click_load_more_buttons(page, max_clicks: int = 50, wait_ms: int = 2000):
                                 clicked = True
                                 log(f"ボタンクリック: '{text}' (#{total_clicks})")
                                 break
-                    except Exception:
+                    except Exception as e:
+                        log(f"ボタンクリック処理中にエラー: {e}")
                         continue
                 if clicked:
                     break
-            except Exception:
+            except Exception as e:
+                log(f"ボタン検索中にエラー: {e}")
                 continue
 
         # 2. CSSセレクタによるボタン検索
@@ -696,9 +698,11 @@ def click_load_more_buttons(page, max_clicks: int = 50, wait_ms: int = 2000):
                                 text = (el.inner_text() or "").strip()[:30]
                                 log(f"セレクタクリック: '{text}' ({selector}) (#{total_clicks})")
                                 break
-                        except Exception:
+                        except Exception as e:
+                            log(f"セレクタクリック処理中にエラー: {e}")
                             continue
-                except Exception:
+                except Exception as e:
+                    log(f"セレクタ検索中にエラー ({selector}): {e}")
                     continue
 
         # 3. 無限スクロール
@@ -740,10 +744,11 @@ def dismiss_cookie_banners(page):
                         page.wait_for_timeout(500)
                         log(f"Cookie バナーを閉じました: '{text}'")
                         return
-                except Exception:
+                except Exception as e:
+                    log(f"Cookie バナー要素処理中にエラー: {e}")
                     continue
-    except Exception:
-        pass
+    except Exception as e:
+        log(f"Cookie バナー処理中にエラー: {e}")
 
 
 # ────────────────────────────────────────────
