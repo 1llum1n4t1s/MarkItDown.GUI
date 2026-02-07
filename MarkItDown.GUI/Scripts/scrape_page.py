@@ -281,16 +281,33 @@ URL: {page_summary['url']}
 
 def extract_json_from_text(text: str) -> str | None:
     """テキストから JSON 部分を抽出する"""
-    # ```json ... ``` ブロック
+    # ```json ... ``` ブロックを優先
     m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
     if m:
-        return m.group(1).strip()
+        candidate = m.group(1).strip()
+        try:
+            json.loads(candidate)
+            return candidate
+        except json.JSONDecodeError:
+            pass
 
-    # JSON オブジェクトを直接検出（最初の { から最後の } までをスライス）
-    start = text.find('{')
-    end = text.rfind('}')
-    if start != -1 and end > start:
-        candidate = text[start:end + 1]
+    # JSON オブジェクトまたは配列を直接検出
+    first_brace = text.find('{')
+    first_bracket = text.find('[')
+
+    if first_brace != -1 and (first_bracket == -1 or first_brace < first_bracket):
+        start_pos = first_brace
+        end_char = '}'
+    elif first_bracket != -1:
+        start_pos = first_bracket
+        end_char = ']'
+    else:
+        return None
+
+    end_pos = text.rfind(end_char)
+
+    if end_pos > start_pos:
+        candidate = text[start_pos:end_pos + 1]
         try:
             json.loads(candidate)
             return candidate
