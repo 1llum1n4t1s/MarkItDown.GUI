@@ -15,7 +15,7 @@ public sealed class PlaywrightScraperService
 {
     private readonly string _pythonExecutablePath;
     private readonly Action<string> _logMessage;
-    private bool _isPlaywrightInstalled;
+    private bool _dependenciesInstalled;
     private string? _ollamaUrl;
     private string? _ollamaModel;
 
@@ -35,13 +35,13 @@ public sealed class PlaywrightScraperService
     }
 
     /// <summary>
-    /// playwright パッケージがインストールされているかチェックし、なければインストールする
+    /// 必要な Python パッケージ (playwright, openai) がインストールされているかチェックし、なければインストールする
     /// </summary>
-    public async Task EnsurePlaywrightInstalledAsync(CancellationToken ct = default)
+    public async Task EnsureDependenciesInstalledAsync(CancellationToken ct = default)
     {
-        if (_isPlaywrightInstalled) return;
+        if (_dependenciesInstalled) return;
 
-        // パッケージチェック
+        // playwright パッケージチェック
         if (!await CheckPackageInstalledAsync("playwright", ct))
         {
             _logMessage("playwright パッケージをインストール中...");
@@ -52,7 +52,18 @@ public sealed class PlaywrightScraperService
             _logMessage("playwright パッケージはインストール済みです");
         }
 
-        _isPlaywrightInstalled = true;
+        // openai パッケージチェック
+        if (!await CheckPackageInstalledAsync("openai", ct))
+        {
+            _logMessage("openai パッケージをインストール中...");
+            await InstallPackageAsync("openai", ct);
+        }
+        else
+        {
+            _logMessage("openai パッケージはインストール済みです");
+        }
+
+        _dependenciesInstalled = true;
     }
 
     /// <summary>
@@ -63,7 +74,7 @@ public sealed class PlaywrightScraperService
     /// <param name="ct">キャンセルトークン</param>
     public async Task ScrapeWithBrowserAsync(string url, string outputPath, CancellationToken ct = default)
     {
-        await EnsurePlaywrightInstalledAsync(ct);
+        await EnsureDependenciesInstalledAsync(ct);
 
         var appDir = Directory.GetCurrentDirectory();
         var scriptPath = Path.Combine(appDir, "Scripts", "scrape_page.py");
