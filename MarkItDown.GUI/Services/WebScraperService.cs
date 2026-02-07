@@ -18,6 +18,7 @@ namespace MarkItDown.GUI.Services;
 public sealed class WebScraperService : IDisposable
 {
     private readonly HttpClient _httpClient;
+    private readonly HttpClient _ollamaClient;
     private readonly Action<string> _logMessage;
     private PlaywrightScraperService? _playwrightScraper;
     private string? _ollamaUrl;
@@ -39,6 +40,7 @@ public sealed class WebScraperService : IDisposable
         };
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+        _ollamaClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
     }
 
     /// <summary>
@@ -384,8 +386,7 @@ public sealed class WebScraperService : IDisposable
         var requestJson = JsonSerializer.Serialize(requestBody);
         using var content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json");
 
-        using var ollamaClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
-        var response = await ollamaClient.PostAsync($"{_ollamaUrl}/api/generate", content, ct);
+        var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/api/generate", content, ct);
         response.EnsureSuccessStatusCode();
 
         var responseJson = await response.Content.ReadAsStringAsync(ct);
@@ -664,7 +665,11 @@ public sealed class WebScraperService : IDisposable
         return v.ValueKind switch { JsonValueKind.True => true, JsonValueKind.False => false, _ => null };
     }
 
-    public void Dispose() => _httpClient.Dispose();
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+        _ollamaClient.Dispose();
+    }
 }
 
 // ════════════════════════════════════════════════
