@@ -191,9 +191,17 @@ public sealed class PlaywrightScraperService
             return;
         }
 
-        var output = await process.StandardOutput.ReadToEndAsync(ct);
-        var error = await process.StandardError.ReadToEndAsync(ct);
-        await Task.Run(() => process.WaitForExit(TimeoutSettings.PlaywrightInstallTimeoutMs), ct);
+        var outputSb = new StringBuilder();
+        var errorSb = new StringBuilder();
+        process.OutputDataReceived += (_, e) => { if (e.Data is not null) outputSb.AppendLine(e.Data); };
+        process.ErrorDataReceived += (_, e) => { if (e.Data is not null) errorSb.AppendLine(e.Data); };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        await process.WaitForExitAsync(ct);
+
+        var output = outputSb.ToString();
+        var error = errorSb.ToString();
 
         if (!string.IsNullOrEmpty(output))
             _logMessage($"pip: {output.TrimEnd()}");
