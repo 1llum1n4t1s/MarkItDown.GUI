@@ -286,11 +286,11 @@ def extract_json_from_text(text: str) -> str | None:
     if m:
         return m.group(1).strip()
 
-    # JSON オブジェクトを直接検出
-    m = re.search(r"(\{[\s\S]*\})", text, re.DOTALL)
-    if m:
-        # 有効な JSON かチェック
-        candidate = m.group(1).strip()
+    # JSON オブジェクトを直接検出（最初の { から最後の } までをスライス）
+    start = text.find('{')
+    end = text.rfind('}')
+    if start != -1 and end > start:
+        candidate = text[start:end + 1]
         try:
             json.loads(candidate)
             return candidate

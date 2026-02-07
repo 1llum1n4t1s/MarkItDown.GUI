@@ -404,12 +404,21 @@ public sealed class WebScraperService : IDisposable
                 return codeBlockMatch.Groups[1].Value.Trim();
             }
 
-            // JSON配列またはオブジェクトとして始まる部分を抽出
-            var jsonMatch = Regex.Match(text, @"(\{[\s\S]*\}|\[[\s\S]*\])",
-                RegexOptions.Singleline);
-            if (jsonMatch.Success)
+            // JSON オブジェクトまたは配列を抽出（最初の開始文字から最後の終了文字まで）
+            var objStart = text.IndexOf('{');
+            var objEnd = text.LastIndexOf('}');
+            var arrStart = text.IndexOf('[');
+            var arrEnd = text.LastIndexOf(']');
+
+            // オブジェクトと配列のうち、先に出現する方を採用
+            if (objStart >= 0 && objEnd > objStart &&
+                (arrStart < 0 || objStart <= arrStart))
             {
-                return jsonMatch.Groups[1].Value.Trim();
+                return text[objStart..(objEnd + 1)];
+            }
+            if (arrStart >= 0 && arrEnd > arrStart)
+            {
+                return text[arrStart..(arrEnd + 1)];
             }
 
             return text.Trim();
