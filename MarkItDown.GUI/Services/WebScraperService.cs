@@ -259,8 +259,7 @@ public sealed class WebScraperService : IDisposable
     /// </summary>
     private async Task<string?> FormatJsonChunkWithOllamaAsync(string rawJson, CancellationToken ct)
     {
-        var prompt = BuildFormatPrompt(rawJson);
-        return await CallOllamaGenerateAsync(prompt, ct);
+        return await CallOllamaChatAsync(FormatSystemPrompt, BuildFormatUserPrompt(rawJson), ct);
     }
 
     /// <summary>
@@ -418,32 +417,38 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// Ollama /api/generate エンドポイントを呼び出してテキストを生成する
+    /// Ollama の OpenAI互換チャットエンドポイント (/v1/chat/completions) を呼び出す
     /// </summary>
-    private async Task<string?> CallOllamaGenerateAsync(string prompt, CancellationToken ct)
+    private async Task<string?> CallOllamaChatAsync(string systemPrompt, string userMessage, CancellationToken ct)
     {
         var requestBody = new
         {
             model = _ollamaModel,
-            prompt = prompt,
-            stream = false,
-            options = new
+            messages = new object[]
             {
-                temperature = 0.1,
-                num_predict = 16384
-            }
+                new { role = "system", content = systemPrompt },
+                new { role = "user", content = userMessage }
+            },
+            stream = false,
+            temperature = 0.1,
+            max_tokens = 16384
         };
 
         var requestJson = JsonSerializer.Serialize(requestBody);
         using var content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json");
 
-        var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/api/generate", content, ct);
+        var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/v1/chat/completions", content, ct);
         response.EnsureSuccessStatusCode();
 
         var responseJson = await response.Content.ReadAsStringAsync(ct);
         var responseDoc = JsonSerializer.Deserialize<JsonElement>(responseJson);
 
-        if (responseDoc.TryGetProperty("response", out var responseText))
+        // OpenAI互換レスポンス: choices[0].message.content
+        if (responseDoc.TryGetProperty("choices", out var choices) &&
+            choices.ValueKind == JsonValueKind.Array &&
+            choices.GetArrayLength() > 0 &&
+            choices[0].TryGetProperty("message", out var message) &&
+            message.TryGetProperty("content", out var responseText))
         {
             var text = responseText.GetString() ?? "";
 
@@ -516,31 +521,30 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// JSON整形用のプロンプトを構築する
+    /// JSON整形用のシステムプロンプト
     /// </summary>
-    private static string BuildFormatPrompt(string rawJson)
+    private const string FormatSystemPrompt = """
+        あなたはJSON整形の専門家です。スクレイピングで取得した生のJSONデータを、
+        整った構造の読みやすいJSONに整形してください。
+
+        【重要な規則】
+        1. 情報を絶対に欠落させないでください。全てのデータを保持してください。
+        2. 出力はJSONのみにしてください。説明文やマークダウンは不要です。
+        3. 重複している内容は1つにまとめてください。
+        4. テキストコンテンツは意味のある単位でグループ化してください。
+        5. 空文字列や意味のないデータ（ナビゲーション要素、広告テキスト等）は除去してください。
+        6. 日本語と英語のコンテンツはそのまま保持してください。翻訳しないでください。
+        7. URLやリンク情報はそのまま保持してください。
+        8. 日時情報はISO 8601形式で保持してください。
+        9. ページ番号やメタデータも保持してください。
+        """;
+
+    /// <summary>
+    /// JSON整形用のユーザーメッセージを構築する
+    /// </summary>
+    private static string BuildFormatUserPrompt(string rawJson)
     {
-        return $"""
-            あなたはJSON整形の専門家です。以下のスクレイピングで取得した生のJSONデータを、
-            整った構造の読みやすいJSONに整形してください。
-
-            【重要な規則】
-            1. 情報を絶対に欠落させないでください。全てのデータを保持してください。
-            2. 出力はJSONのみにしてください。説明文やマークダウンは不要です。
-            3. 重複している内容は1つにまとめてください。
-            4. テキストコンテンツは意味のある単位でグループ化してください。
-            5. 空文字列や意味のないデータ（ナビゲーション要素、広告テキスト等）は除去してください。
-            6. 日本語と英語のコンテンツはそのまま保持してください。翻訳しないでください。
-            7. URLやリンク情報はそのまま保持してください。
-            8. 日時情報はISO 8601形式で保持してください。
-            9. ページ番号やメタデータも保持してください。
-
-            【入力JSON】
-            {rawJson}
-
-            【出力】
-            整形されたJSONのみを出力してください:
-            """;
+        return $"以下のJSONを整形してください。整形されたJSONのみを出力してください:\n\n{rawJson}";
     }
 
     // ────────────────────────────────────────────
