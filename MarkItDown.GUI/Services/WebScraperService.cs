@@ -456,7 +456,7 @@ public sealed class WebScraperService : IDisposable
                 return codeBlockMatch.Groups[1].Value.Trim();
             }
 
-            // JSON オブジェクトまたは配列を抽出
+            // JSON オブジェクトまたは配列をスタックベースで抽出
             var objStart = text.IndexOf('{');
             var arrStart = text.IndexOf('[');
 
@@ -466,21 +466,43 @@ public sealed class WebScraperService : IDisposable
             }
 
             int start;
-            char endChar;
+            char openChar;
+            char closeChar;
 
             // 先に出現する開始文字を特定し、対応する終了文字を決定
             if (objStart != -1 && (arrStart == -1 || objStart < arrStart))
             {
                 start = objStart;
-                endChar = '}';
+                openChar = '{';
+                closeChar = '}';
             }
             else
             {
                 start = arrStart;
-                endChar = ']';
+                openChar = '[';
+                closeChar = ']';
             }
 
-            var end = text.LastIndexOf(endChar);
+            // スタックで対応する閉じ文字を探す（文字列リテラル内を考慮）
+            var depth = 0;
+            var inString = false;
+            var escapeNext = false;
+            var end = -1;
+
+            for (var i = start; i < text.Length; i++)
+            {
+                var c = text[i];
+                if (escapeNext) { escapeNext = false; continue; }
+                if (c == '\\' && inString) { escapeNext = true; continue; }
+                if (c == '"') { inString = !inString; continue; }
+                if (inString) continue;
+                if (c == openChar) depth++;
+                else if (c == closeChar)
+                {
+                    depth--;
+                    if (depth == 0) { end = i; break; }
+                }
+            }
 
             if (end > start)
             {

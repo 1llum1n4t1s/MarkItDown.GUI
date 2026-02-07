@@ -291,20 +291,49 @@ def extract_json_from_text(text: str) -> str | None:
         except json.JSONDecodeError:
             pass
 
-    # JSON オブジェクトまたは配列を直接検出
+    # JSON オブジェクトまたは配列をスタックベースで検出
     first_brace = text.find('{')
     first_bracket = text.find('[')
 
-    if first_brace != -1 and (first_bracket == -1 or first_brace < first_bracket):
-        start_pos = first_brace
-        end_char = '}'
-    elif first_bracket != -1:
-        start_pos = first_bracket
-        end_char = ']'
-    else:
+    if first_brace == -1 and first_bracket == -1:
         return None
 
-    end_pos = text.rfind(end_char)
+    # 先に出現する開始文字を特定
+    if first_brace != -1 and (first_bracket == -1 or first_brace < first_bracket):
+        start_pos = first_brace
+        open_char = '{'
+        close_char = '}'
+    else:
+        start_pos = first_bracket
+        open_char = '['
+        close_char = ']'
+
+    # スタックで対応する閉じ文字を探す（文字列リテラル内を考慮）
+    depth = 0
+    in_string = False
+    escape_next = False
+    end_pos = -1
+
+    for i in range(start_pos, len(text)):
+        c = text[i]
+        if escape_next:
+            escape_next = False
+            continue
+        if c == '\\' and in_string:
+            escape_next = True
+            continue
+        if c == '"' :
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if c == open_char:
+            depth += 1
+        elif c == close_char:
+            depth -= 1
+            if depth == 0:
+                end_pos = i
+                break
 
     if end_pos > start_pos:
         candidate = text[start_pos:end_pos + 1]
