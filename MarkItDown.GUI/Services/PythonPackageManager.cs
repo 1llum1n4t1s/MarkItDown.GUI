@@ -42,7 +42,7 @@ public class PythonPackageManager
     }
 
     /// <summary>
-    /// openaiパッケージの状態をチェックしてインストールする（MarkItDownのネイティブLLM統合に必要）
+    /// openaiパッケージの状態をチェックし、インストールまたは最新バージョンに更新する（MarkItDownのネイティブLLM統合に必要）
     /// </summary>
     private void CheckAndInstallOpenAIPackage()
     {
@@ -51,11 +51,13 @@ public class PythonPackageManager
             if (!CheckPackageInstalled("openai"))
             {
                 _logMessage("openaiパッケージが不足しているのでpipでインストールするのだ");
-                InstallPackageWithPip("openai");
-                return;
             }
-
-            _logMessage("openaiパッケージはインストール済みなのだ");
+            else
+            {
+                _logMessage("openaiパッケージの最新バージョンを確認中...");
+            }
+            // --upgrade 付きで実行し、未インストール時はインストール、インストール済み時は最新に更新
+            InstallPackageWithPip("openai");
         }
         catch (Exception ex)
         {
@@ -124,7 +126,7 @@ public class PythonPackageManager
                 return;
             }
 
-            _logMessage($"pipで{packageName}をインストール中...");
+            _logMessage($"pipで{packageName}をインストール/更新中...");
             var installInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
@@ -137,6 +139,7 @@ public class PythonPackageManager
             installInfo.ArgumentList.Add("-m");
             installInfo.ArgumentList.Add("pip");
             installInfo.ArgumentList.Add("install");
+            installInfo.ArgumentList.Add("--upgrade");
             installInfo.ArgumentList.Add(packageName);
 
             using var installProc = Process.Start(installInfo);
@@ -170,21 +173,22 @@ public class PythonPackageManager
 
     
     /// <summary>
-    /// markitdownパッケージの状態をチェックして統一するのだ
+    /// markitdownパッケージの状態をチェックし、インストールまたは最新バージョンに更新する
     /// </summary>
     private void CheckAndUnifyMarkItDownInstallation()
     {
         try
         {
-            // markitdownがインストールされているかチェック
             if (!CheckMarkItDownInstalled())
             {
                 _logMessage("markitdownパッケージが不足しているのでpipでインストールするのだ");
-                InstallMarkItDownWithPip();
-                return;
             }
-            
-            _logMessage("markitdownパッケージはインストール済みなのだ");
+            else
+            {
+                _logMessage("markitdownパッケージの最新バージョンを確認中...");
+            }
+            // --upgrade 付きで実行し、未インストール時はインストール、インストール済み時は最新に更新
+            InstallMarkItDownWithPip();
         }
         catch (Exception ex)
         {

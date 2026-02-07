@@ -35,33 +35,34 @@ public sealed class PlaywrightScraperService
     }
 
     /// <summary>
-    /// 必要な Python パッケージ (playwright, openai) がインストールされているかチェックし、なければインストールする
+    /// 必要な Python パッケージ (playwright, openai) がインストールされているかチェックし、
+    /// なければインストール、あれば最新バージョンに更新する
     /// </summary>
     public async Task EnsureDependenciesInstalledAsync(CancellationToken ct = default)
     {
         if (_dependenciesInstalled) return;
 
-        // playwright パッケージチェック
+        // playwright パッケージチェック・更新
         if (!await CheckPackageInstalledAsync("playwright", ct))
         {
             _logMessage("playwright パッケージをインストール中...");
-            await InstallPackageAsync("playwright", ct);
         }
         else
         {
-            _logMessage("playwright パッケージはインストール済みです");
+            _logMessage("playwright パッケージの最新バージョンを確認中...");
         }
+        await InstallPackageAsync("playwright", ct);
 
-        // openai パッケージチェック
+        // openai パッケージチェック・更新
         if (!await CheckPackageInstalledAsync("openai", ct))
         {
             _logMessage("openai パッケージをインストール中...");
-            await InstallPackageAsync("openai", ct);
         }
         else
         {
-            _logMessage("openai パッケージはインストール済みです");
+            _logMessage("openai パッケージの最新バージョンを確認中...");
         }
+        await InstallPackageAsync("openai", ct);
 
         _dependenciesInstalled = true;
     }
@@ -193,12 +194,13 @@ public sealed class PlaywrightScraperService
         startInfo.ArgumentList.Add("-m");
         startInfo.ArgumentList.Add("pip");
         startInfo.ArgumentList.Add("install");
+        startInfo.ArgumentList.Add("--upgrade");
         startInfo.ArgumentList.Add(packageName);
 
         using var process = Process.Start(startInfo);
         if (process is null)
         {
-            _logMessage($"{packageName} のインストールプロセス起動に失敗");
+            _logMessage($"{packageName} のインストール/更新プロセス起動に失敗");
             return;
         }
 
@@ -231,8 +233,8 @@ public sealed class PlaywrightScraperService
             _logMessage($"pip エラー: {error.TrimEnd()}");
 
         if (process.ExitCode == 0)
-            _logMessage($"{packageName} のインストール完了");
+            _logMessage($"{packageName} のインストール/更新完了");
         else
-            _logMessage($"{packageName} のインストールに失敗しました");
+            _logMessage($"{packageName} のインストール/更新に失敗しました");
     }
 }
