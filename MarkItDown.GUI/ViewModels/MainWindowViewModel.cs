@@ -335,7 +335,8 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (_webScraperService is null)
         {
-            _webScraperService = new WebScraperService(LogMessage);
+            LogMessage("初期化が完了していません。しばらくお待ちください。");
+            return;
         }
 
         ShowProcessing("URL抽出中...", "Webページをスクレイピングしています...");
