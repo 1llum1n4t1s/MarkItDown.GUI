@@ -9,9 +9,35 @@
         Height="400">
     <Grid>
         <!-- メインコンテンツ -->
-        <Grid RowDefinitions="Auto,*">
-        <!-- ドロップ領域 -->
+        <Grid RowDefinitions="Auto,Auto,*">
+        <!-- URL入力エリア -->
         <Border Grid.Row="0"
+                BorderThickness="1"
+                BorderBrush="{actipro:ThemeResource Container4BorderBrush}"
+                Background="{actipro:ThemeResource Container4BackgroundBrush}"
+                CornerRadius="{actipro:ScaledCornerRadius 1.5}"
+                Padding="{actipro:ScaledThickness 2}"
+                Margin="5,5,5,0">
+            <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0"
+                         x:Name="UrlInputTextBox"
+                         Text="{Binding UrlInput, Mode=TwoWay}"
+                         Watermark="WebページのURLを入力..."
+                         FontSize="13"
+                         VerticalContentAlignment="Center"
+                         Margin="0,0,5,0"/>
+                <Button Grid.Column="1"
+                        x:Name="ExtractButton"
+                        Content="🌐 抽出"
+                        Click="ExtractButton_Click"
+                        FontSize="13"
+                        Padding="12,6"
+                        VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <!-- ドロップ領域 -->
+        <Border Grid.Row="1"
                 x:Name="DropZoneBorder"
                 BorderThickness="1"
                 BorderBrush="{actipro:ThemeResource Container4BorderBrush}"
@@ -35,7 +61,7 @@
         </Border>
 
         <!-- ログ表示エリア -->
-        <Expander Grid.Row="1"
+        <Expander Grid.Row="2"
                   Header="ログ"
                   IsExpanded="True"
                   Margin="5"

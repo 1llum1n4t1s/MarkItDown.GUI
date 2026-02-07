@@ -16,11 +16,13 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private IBrush _dropZoneBackground;
     private FileProcessor? _fileProcessor;
     private OllamaManager? _ollamaManager;
+    private WebScraperService? _webScraperService;
     private bool _isProcessing;
     private string _processingTitle = string.Empty;
     private string _processingStatus = string.Empty;
     private double _downloadProgress;
     private bool _isDownloading;
+    private string _urlInput = string.Empty;
     private readonly List<string> _logBatch = new();
     private readonly object _logBatchLock = new();
     private const int MaxLogLines = 10000; // ログ行数上限（メモリ節約）
@@ -94,6 +96,15 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// URL入力テキスト
+    /// </summary>
+    public string UrlInput
+    {
+        get => _urlInput;
+        set => SetProperty(ref _urlInput, value);
+    }
+
+    /// <summary>
     /// コンストラクタ
     /// </summary>
     public MainWindowViewModel()
@@ -147,6 +158,18 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             UpdateProcessingStatus("MarkItDownライブラリを準備中...");
             var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, ollamaUrl, ollamaModel);
             _fileProcessor = new FileProcessor(markItDownProcessor, LogMessage);
+
+            _webScraperService = new WebScraperService(LogMessage);
+            var playwrightScraper = new PlaywrightScraperService(pythonExe, LogMessage);
+
+            // Ollama が利用可能な場合、Playwright/WebScraper に設定を渡す
+            if (_ollamaManager is { IsOllamaAvailable: true })
+            {
+                playwrightScraper.SetOllamaConfig(_ollamaManager.OllamaUrl, _ollamaManager.DefaultModel);
+                _webScraperService.SetOllamaConfig(_ollamaManager.OllamaUrl, _ollamaManager.DefaultModel);
+            }
+
+            _webScraperService.SetPlaywrightScraper(playwrightScraper);
 
             UpdateProcessingStatus("初期化完了");
             LogMessage("すべての初期化が完了しました。");
@@ -294,6 +317,55 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             FlushLogBatchFinal();
             HideProcessing();
             SetDropZoneDefault();
+        }
+    }
+
+    /// <summary>
+    /// URLからWebページをスクレイピングしてJSONで出力する
+    /// </summary>
+    /// <param name="outputDirectory">出力先ディレクトリ</param>
+    public async Task ExtractUrlAsync(string outputDirectory)
+    {
+        var url = UrlInput?.Trim();
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            LogMessage("URLが入力されていません。");
+            return;
+        }
+
+        if (_webScraperService is null)
+        {
+            _webScraperService = new WebScraperService(LogMessage);
+        }
+
+        ShowProcessing("URL抽出中...", "Webページをスクレイピングしています...");
+        try
+        {
+            // ファイル名をURLから生成（安全な名前に変換）
+            var fileName = WebScraperService.GenerateSafeFileName(url);
+            var outputPath = System.IO.Path.Combine(outputDirectory, fileName);
+
+            await _webScraperService.ScrapeAsync(url, outputPath);
+            LogMessage($"抽出完了: {outputPath}");
+        }
+        catch (HttpRequestException ex)
+        {
+            LogMessage($"HTTP通信エラー: {ex.Message}");
+            Logger.LogException("URL抽出中にHTTPエラーが発生しました", ex);
+        }
+        catch (ArgumentException ex)
+        {
+            LogMessage($"URL解析エラー: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            LogMessage($"URL抽出中にエラーが発生しました: {ex.Message}");
+            Logger.LogException("URL抽出中にエラーが発生しました", ex);
+        }
+        finally
+        {
+            FlushLogBatchFinal();
+            HideProcessing();
         }
     }
 
@@ -454,6 +526,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             try
             {
                 _ollamaManager?.Dispose();
+                _webScraperService?.Dispose();
             }
             catch (Exception ex)
             {

@@ -45,4 +45,16 @@ public static class TimeoutSettings
     /// Ollamaでの画像説明生成を含む場合、処理に時間がかかるため長めに設定
     /// </summary>
     public const int FileConversionTimeoutMs = 600000;
+
+    /// <summary>
+    /// Timeout for Playwright scraping (5 minutes)
+    /// ページネーションや動的コンテンツの読み込みに時間がかかるため長めに設定
+    /// </summary>
+    public const int PlaywrightScrapeTimeoutMs = 300000;
+
+    /// <summary>
+    /// Timeout for Playwright package installation (5 minutes)
+    /// ブラウザバイナリのダウンロードを含むため長めに設定
+    /// </summary>
+    public const int PlaywrightInstallTimeoutMs = 300000;
 }
