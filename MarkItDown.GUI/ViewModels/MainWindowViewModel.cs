@@ -408,9 +408,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 var host = uri.Host.ToLowerInvariant();
                 if ((host is "x.com" or "www.x.com" or "twitter.com" or "www.twitter.com"
-                     or "mobile.twitter.com" or "mobile.x.com"))
+                     or "mobile.twitter.com" or "mobile.x.com")
+                    && WebScraperService.TryExtractXTwitterUsername(normalizedUrl, out var username))
                 {
-                    var username = WebScraperService.ExtractXTwitterUsername(normalizedUrl);
                     // 重複フォルダ回避: 同名フォルダが既に存在する場合は _1, _2, ... を付与
                     var baseDirName = username;
                     var userDir = System.IO.Path.Combine(outputDirectory, baseDirName);
