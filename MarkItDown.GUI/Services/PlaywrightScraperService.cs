@@ -49,22 +49,22 @@ public sealed class PlaywrightScraperService
         // playwright パッケージチェック・更新
         if (!await CheckPackageInstalledAsync("playwright", ct))
         {
-            _logMessage("playwright パッケージをインストール中...");
+            _logMessage("playwright パッケージをインストール中なのだ...");
         }
         else
         {
-            _logMessage("playwright パッケージの最新バージョンを確認中...");
+            _logMessage("playwright パッケージの最新バージョンを確認中なのだ...");
         }
         await InstallPackageAsync("playwright", ct);
 
         // openai パッケージチェック・更新
         if (!await CheckPackageInstalledAsync("openai", ct))
         {
-            _logMessage("openai パッケージをインストール中...");
+            _logMessage("openai パッケージをインストール中なのだ...");
         }
         else
         {
-            _logMessage("openai パッケージの最新バージョンを確認中...");
+            _logMessage("openai パッケージの最新バージョンを確認中なのだ...");
         }
         await InstallPackageAsync("openai", ct);
 
@@ -90,7 +90,7 @@ public sealed class PlaywrightScraperService
         }
 
         _statusCallback?.Invoke("Playwright でページを読み込み中...");
-        _logMessage($"Playwright スクレイピング開始: {url}");
+        _logMessage($"Playwright スクレイピング開始なのだ: {url}");
 
         var startInfo = new ProcessStartInfo
         {
@@ -145,7 +145,7 @@ public sealed class PlaywrightScraperService
         {
             if (!process.HasExited)
             {
-                _logMessage("スクレイピングがタイムアウトまたはキャンセルされました。プロセスを強制終了します。");
+                _logMessage("スクレイピングがタイムアウトまたはキャンセルされたのだ。プロセスを強制終了するのだ。");
                 try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
             }
             if (ct.IsCancellationRequested) throw;
@@ -169,7 +169,7 @@ public sealed class PlaywrightScraperService
             throw new FileNotFoundException($"出力ファイルが生成されませんでした: {outputPath}");
         }
 
-        _logMessage($"Playwright スクレイピング完了: {outputPath}");
+        _logMessage($"Playwright スクレイピング完了なのだ: {outputPath}");
     }
 
     /// <summary>
@@ -223,8 +223,8 @@ public sealed class PlaywrightScraperService
             _logMessage($"pip エラー: {error.TrimEnd()}");
 
         if (exitCode == 0)
-            _logMessage($"{packageName} のインストール/更新完了");
+            _logMessage($"{packageName} のインストール/更新完了なのだ");
         else
-            _logMessage($"{packageName} のインストール/更新に失敗しました");
+            _logMessage($"{packageName} のインストール/更新に失敗したのだ");
     }
 }

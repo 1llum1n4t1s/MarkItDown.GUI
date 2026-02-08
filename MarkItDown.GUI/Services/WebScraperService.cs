@@ -76,7 +76,7 @@ public sealed class WebScraperService : IDisposable
     {
         url = NormalizeUrl(url);
         var siteType = DetectSiteType(url);
-        _logMessage($"サイト種別: {siteType}");
+        _logMessage($"サイト種別: {siteType} なのだ");
 
         if (siteType == SiteType.Reddit)
         {
@@ -91,7 +91,7 @@ public sealed class WebScraperService : IDisposable
             };
             var json = JsonSerializer.Serialize(result, options);
             await File.WriteAllTextAsync(outputPath, json, System.Text.Encoding.UTF8, ct);
-            _logMessage($"JSONファイルを出力しました: {outputPath}");
+            _logMessage($"JSONファイルを出力したのだ: {outputPath}");
         }
         else
         {
@@ -102,7 +102,7 @@ public sealed class WebScraperService : IDisposable
 
             // Playwright + Ollama ガイド型でスクレイピング
             _statusCallback?.Invoke("Playwright でスクレイピング中...");
-            _logMessage("Playwright + Ollama ガイド型でスクレイピングします...");
+            _logMessage("Playwright + Ollama ガイド型でスクレイピングするのだ...");
             await _playwrightScraper.ScrapeWithBrowserAsync(url, outputPath, ct);
         }
 
@@ -185,7 +185,7 @@ public sealed class WebScraperService : IDisposable
     {
         if (string.IsNullOrEmpty(_ollamaUrl) || string.IsNullOrEmpty(_ollamaModel))
         {
-            _logMessage("Ollama が設定されていないため、JSON整形をスキップします。");
+            _logMessage("Ollama が設定されていないため、JSON整形をスキップするのだ。");
             return;
         }
 
@@ -197,12 +197,12 @@ public sealed class WebScraperService : IDisposable
         try
         {
             _statusCallback?.Invoke("Ollama でJSON整形中...");
-            _logMessage("Ollama でJSON整形を開始します...");
+            _logMessage("Ollama でJSON整形を開始するのだ...");
             var rawJson = await File.ReadAllTextAsync(jsonFilePath, System.Text.Encoding.UTF8, ct);
 
             if (string.IsNullOrWhiteSpace(rawJson))
             {
-                _logMessage("JSONファイルが空のため、整形をスキップします。");
+                _logMessage("JSONファイルが空のため、整形をスキップするのだ。");
                 return;
             }
 
@@ -227,31 +227,31 @@ public sealed class WebScraperService : IDisposable
                 {
                     JsonSerializer.Deserialize<JsonElement>(formattedJson);
                     await File.WriteAllTextAsync(jsonFilePath, formattedJson, System.Text.Encoding.UTF8, ct);
-                    _logMessage("Ollama によるJSON整形が完了しました。");
+                    _logMessage("Ollama によるJSON整形が完了したのだ！");
                 }
                 catch (JsonException)
                 {
-                    _logMessage("Ollama の出力が有効なJSONではないため、元のJSONを保持します。");
+                    _logMessage("Ollama の出力が有効なJSONではないため、元のJSONを保持するのだ。");
                 }
             }
             else
             {
-                _logMessage("Ollama からの応答が空のため、元のJSONを保持します。");
+                _logMessage("Ollama からの応答が空のため、元のJSONを保持するのだ。");
             }
         }
         catch (HttpRequestException ex)
         {
-            _logMessage($"Ollama への接続に失敗しました: {ex.Message}");
-            _logMessage("元のJSONをそのまま保持します。");
+            _logMessage($"Ollama への接続に失敗したのだ: {ex.Message}");
+            _logMessage("元のJSONをそのまま保持するのだ。");
         }
         catch (TaskCanceledException)
         {
-            _logMessage("Ollama のJSON整形がタイムアウトしました。元のJSONを保持します。");
+            _logMessage("Ollama のJSON整形がタイムアウトしたのだ。元のJSONを保持するのだ。");
         }
         catch (Exception ex)
         {
-            _logMessage($"JSON整形中にエラーが発生しました: {ex.Message}");
-            _logMessage("元のJSONをそのまま保持します。");
+            _logMessage($"JSON整形中にエラーが発生したのだ: {ex.Message}");
+            _logMessage("元のJSONをそのまま保持するのだ。");
         }
     }
 
@@ -270,7 +270,7 @@ public sealed class WebScraperService : IDisposable
     private async Task<string?> FormatLargeJsonWithOllamaAsync(string rawJson, CancellationToken ct)
     {
         _statusCallback?.Invoke("JSONをチャンク分割で整形中...");
-        _logMessage("JSONが大きいため、チャンク分割で整形します...");
+        _logMessage("JSONが大きいため、チャンク分割で整形するのだ...");
 
         try
         {
@@ -293,12 +293,12 @@ public sealed class WebScraperService : IDisposable
             }
 
             // その他の場合は分割せずにそのまま送信（サイズ制限超えでも試行）
-            _logMessage("JSONの構造が分割に適していないため、一括で整形を試みます...");
+            _logMessage("JSONの構造が分割に適していないため、一括で整形を試みるのだ...");
             return await FormatJsonChunkWithOllamaAsync(rawJson, ct);
         }
         catch (JsonException)
         {
-            _logMessage("JSON解析エラーのため、一括で整形を試みます...");
+            _logMessage("JSON解析エラーのため、一括で整形を試みるのだ...");
             return await FormatJsonChunkWithOllamaAsync(rawJson, ct);
         }
     }
@@ -322,7 +322,7 @@ public sealed class WebScraperService : IDisposable
         {
             ct.ThrowIfCancellationRequested();
             _statusCallback?.Invoke($"ページ {i + 1}/{pageCount} を整形中...");
-            _logMessage($"ページ {i + 1}/{pageCount} を整形中...");
+            _logMessage($"ページ {i + 1}/{pageCount} を整形中なのだ...");
 
             var pageJson = JsonSerializer.Serialize(pages[i], jsonOptions);
             var formatted = await FormatJsonChunkWithOllamaAsync(pageJson, ct);
@@ -336,7 +336,7 @@ public sealed class WebScraperService : IDisposable
                 }
                 catch (JsonException)
                 {
-                    _logMessage($"ページ {i + 1} の整形結果が無効なJSONのため、元データを使用します。");
+                    _logMessage($"ページ {i + 1} の整形結果が無効なJSONのため、元データを使用するのだ。");
                 }
             }
             // 整形失敗時は元のページデータを保持
@@ -379,7 +379,7 @@ public sealed class WebScraperService : IDisposable
         {
             ct.ThrowIfCancellationRequested();
             _statusCallback?.Invoke($"content要素 {i + 1}/{itemCount} を整形中...");
-            _logMessage($"content要素 {i + 1}/{itemCount} を整形中...");
+            _logMessage($"content要素 {i + 1}/{itemCount} を整形中なのだ...");
 
             var itemJson = JsonSerializer.Serialize(contentArray[i], jsonOptions);
             var formatted = await FormatJsonChunkWithOllamaAsync(itemJson, ct);
@@ -393,7 +393,7 @@ public sealed class WebScraperService : IDisposable
                 }
                 catch (JsonException)
                 {
-                    _logMessage($"content要素 {i + 1} の整形結果が無効なJSONのため、元データを使用します。");
+                    _logMessage($"content要素 {i + 1} の整形結果が無効なJSONのため、元データを使用するのだ。");
                 }
             }
             // 整形失敗時は元のデータを保持
@@ -597,7 +597,7 @@ public sealed class WebScraperService : IDisposable
     private async Task<RedditThreadData> ScrapeRedditAsync(string url, CancellationToken ct)
     {
         var jsonUrl = BuildRedditJsonUrl(url);
-        _logMessage($"Reddit APIにアクセス中: {jsonUrl}");
+        _logMessage($"Reddit APIにアクセス中なのだ: {jsonUrl}");
 
         using var request = new HttpRequestMessage(HttpMethod.Get, jsonUrl);
         request.Headers.Accept.ParseAdd("application/json");
@@ -606,17 +606,17 @@ public sealed class WebScraperService : IDisposable
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content.ReadAsStringAsync(ct);
-        _logMessage($"APIレスポンス取得完了 (サイズ: {body.Length:#,0} bytes)");
+        _logMessage($"APIレスポンス取得完了なのだ (サイズ: {body.Length:#,0} bytes)");
 
         var root = JsonSerializer.Deserialize<JsonElement>(body);
         if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 2)
             throw new InvalidOperationException("予期しないReddit APIレスポンス形式です。");
 
         var post = ExtractRedditPost(root[0]);
-        _logMessage($"投稿を抽出: {post.Title}");
+        _logMessage($"投稿を抽出したのだ: {post.Title}");
 
         var comments = ExtractRedditComments(root[1]);
-        _logMessage($"コメント数: {CountComments(comments)}件");
+        _logMessage($"コメント数: {CountComments(comments)}件なのだ");
 
         return new RedditThreadData
         {
@@ -646,7 +646,7 @@ public sealed class WebScraperService : IDisposable
             : $"/r/{sub}/comments/{postId}/{slug}";
 
         var jsonUrl = $"https://www.reddit.com{normalizedPath.TrimEnd('/')}.json";
-        _logMessage($"正規化URL: {jsonUrl}");
+        _logMessage($"正規化URLなのだ: {jsonUrl}");
         return jsonUrl;
     }
 

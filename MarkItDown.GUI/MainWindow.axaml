@@ -61,20 +61,16 @@
         </Border>
 
         <!-- ログ表示エリア -->
-        <Expander Grid.Row="2"
-                  Header="ログ"
-                  IsExpanded="True"
-                  Margin="5"
-                  VerticalAlignment="Stretch">
-            <ScrollViewer VerticalScrollBarVisibility="Auto"
-                          HorizontalScrollBarVisibility="Auto">
-                <TextBox Text="{Binding LogText, Mode=OneWay}"
-                         IsReadOnly="True"
-                         FontFamily="Consolas"
-                         FontSize="10"
-                         TextWrapping="NoWrap"/>
-            </ScrollViewer>
-        </Expander>
+        <ScrollViewer Grid.Row="2"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Auto"
+                      Margin="5">
+            <TextBox Text="{Binding LogText, Mode=OneWay}"
+                     IsReadOnly="True"
+                     FontFamily="Consolas"
+                     FontSize="10"
+                     TextWrapping="NoWrap"/>
+        </ScrollViewer>
         </Grid>
 
         <!-- 処理中オーバーレイパネル -->

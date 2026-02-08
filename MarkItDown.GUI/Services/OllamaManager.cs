@@ -68,7 +68,7 @@ public class OllamaManager : IDisposable
     {
         try
         {
-            _logMessage("Ollama環境の初期化を開始します...");
+            _logMessage("Ollama環境の初期化を開始するのだ...");
 
             var savedUrl = AppSettings.GetOllamaUrl();
             if (!string.IsNullOrEmpty(savedUrl))
@@ -76,12 +76,12 @@ public class OllamaManager : IDisposable
                 _ollamaUrl = savedUrl;
             }
 
-            _logMessage($"Ollama URL: {_ollamaUrl}");
-            _logMessage($"Ollama モデル: {DefaultModelName}");
+            _logMessage($"Ollama URLなのだ: {_ollamaUrl}");
+            _logMessage($"Ollama モデルなのだ: {DefaultModelName}");
 
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
             var ollamaBaseDir = Path.Combine(appDirectory, "lib", "ollama");
-            _logMessage($"Ollamaディレクトリ: {ollamaBaseDir}");
+            _logMessage($"Ollamaディレクトリなのだ: {ollamaBaseDir}");
 
             if (Directory.Exists(ollamaBaseDir))
             {
@@ -89,22 +89,22 @@ public class OllamaManager : IDisposable
                 if (File.Exists(ollamaExe))
                 {
                     _ollamaExePath = ollamaExe;
-                    _logMessage($"既存のOllamaを検出しました: {_ollamaExePath}");
+                    _logMessage($"既存のOllamaを検出したのだ: {_ollamaExePath}");
                 }
             }
 
             var needsStartup = false;
             if (string.IsNullOrEmpty(_ollamaExePath))
             {
-                _logMessage("埋め込みOllamaが見つからないため、ダウンロードを試行します。");
+                _logMessage("埋め込みOllamaが見つからないため、ダウンロードを試行するのだ。");
                 if (await DownloadAndExtractOllamaAsync(ollamaBaseDir))
                 {
-                    _logMessage($"Ollamaの準備が完了しました: {_ollamaExePath}");
+                    _logMessage($"Ollamaの準備が完了したのだ: {_ollamaExePath}");
                     needsStartup = true;
                 }
                 else
                 {
-                    _logMessage("Ollamaのダウンロードに失敗しました。画像説明機能は無効になります。");
+                    _logMessage("Ollamaのダウンロードに失敗したのだ。画像説明機能は無効になるのだ。");
                     _isAvailable = false;
                     return;
                 }
@@ -117,7 +117,7 @@ public class OllamaManager : IDisposable
 
             if (!_isAvailable || needsStartup)
             {
-                _logMessage("Ollamaサーバーを起動します...");
+                _logMessage("Ollamaサーバーを起動するのだ...");
                 await StartOllamaServerAsync();
                 await Task.Delay(5000);
                 _isAvailable = await CheckOllamaAvailabilityAsync();
@@ -125,22 +125,22 @@ public class OllamaManager : IDisposable
 
             if (_isAvailable)
             {
-                _logMessage("Ollamaが利用可能です。");
+                _logMessage("Ollamaが利用可能なのだ。");
                 var hasModel = await CheckModelAvailabilityAsync(DefaultModelName);
                 if (!hasModel)
                 {
-                    _logMessage($"モデル '{DefaultModelName}' が見つかりません。ダウンロードを開始します...");
+                    _logMessage($"モデル '{DefaultModelName}' が見つからないのだ。ダウンロードを開始するのだ...");
                     await DownloadModelAsync(DefaultModelName);
                 }
             }
             else
             {
-                _logMessage("Ollamaの起動に失敗しました。画像説明機能は無効になります。");
+                _logMessage("Ollamaの起動に失敗したのだ。画像説明機能は無効になるのだ。");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"Ollama初期化中にエラーが発生しました: {ex.Message}");
+            _logMessage($"Ollama初期化中にエラーが発生したのだ: {ex.Message}");
             _isAvailable = false;
         }
     }
@@ -152,28 +152,28 @@ public class OllamaManager : IDisposable
     {
         try
         {
-            _logMessage("Ollamaの接続テストを実行中...");
+            _logMessage("Ollamaの接続テストを実行中なのだ...");
             var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
             
             if (response.IsSuccessStatusCode)
             {
-                _logMessage("Ollamaへの接続に成功しました。");
+                _logMessage("Ollamaへの接続に成功したのだ。");
                 return true;
             }
             else
             {
-                _logMessage($"Ollamaへの接続に失敗しました。ステータスコード: {response.StatusCode}");
+                _logMessage($"Ollamaへの接続に失敗したのだ。ステータスコード: {response.StatusCode}");
                 return false;
             }
         }
         catch (HttpRequestException ex)
         {
-            _logMessage($"Ollamaへの接続エラー: {ex.Message}");
+            _logMessage($"Ollamaへの接続エラーなのだ: {ex.Message}");
             return false;
         }
         catch (Exception ex)
         {
-            _logMessage($"Ollama接続テスト中にエラー: {ex.Message}");
+            _logMessage($"Ollama接続テスト中にエラーなのだ: {ex.Message}");
             return false;
         }
     }
@@ -185,7 +185,7 @@ public class OllamaManager : IDisposable
     {
         try
         {
-            _logMessage($"モデル '{modelName}' の可用性を確認中...");
+            _logMessage($"モデル '{modelName}' の可用性を確認中なのだ...");
             var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
             
             if (!response.IsSuccessStatusCode)
@@ -205,7 +205,7 @@ public class OllamaManager : IDisposable
                         var nameStr = name.GetString();
                         if (nameStr != null && nameStr.StartsWith(modelName, StringComparison.OrdinalIgnoreCase))
                         {
-                            _logMessage($"モデル '{modelName}' が見つかりました。");
+                            _logMessage($"モデル '{modelName}' が見つかったのだ。");
                             return true;
                         }
                     }
@@ -216,7 +216,7 @@ public class OllamaManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logMessage($"モデル確認中にエラー: {ex.Message}");
+            _logMessage($"モデル確認中にエラーなのだ: {ex.Message}");
             return false;
         }
     }
@@ -264,7 +264,7 @@ public class OllamaManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logMessage($"モデル一覧取得中にエラー: {ex.Message}");
+            _logMessage($"モデル一覧取得中にエラーなのだ: {ex.Message}");
             return Array.Empty<string>();
         }
     }
@@ -276,19 +276,19 @@ public class OllamaManager : IDisposable
     {
         if (_isExtracting)
         {
-            _logMessage("既に展開処理が実行中です。");
+            _logMessage("既に展開処理が実行中なのだ。");
             return false;
         }
         try
         {
-            _logMessage("GitHub から Ollama をダウンロード中...");
+            _logMessage("GitHub から Ollama をダウンロード中なのだ...");
             const string downloadUrl = "https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip";
             const string fileName = "ollama-windows-amd64.zip";
 
             Directory.CreateDirectory(ollamaBaseDir);
             var archivePath = Path.Combine(ollamaBaseDir, fileName);
 
-            _logMessage($"Ollamaをダウンロード中: {downloadUrl}");
+            _logMessage($"Ollamaをダウンロード中なのだ: {downloadUrl}");
             _progressCallback?.Invoke(0);
 
             using (var response = await HttpClientForDownload.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
@@ -302,16 +302,16 @@ public class OllamaManager : IDisposable
 
                 if (totalBytes <= 0)
                 {
-                    _logMessage("警告: ダウンロードサイズが不明です。続行します。");
+                    _logMessage("警告: ダウンロードサイズが不明なのだ。続行するのだ。");
                 }
                 else if (totalBytes > MaxDownloadSize)
                 {
-                    _logMessage($"エラー: ダウンロードサイズが大きすぎます（{totalBytes / 1024.0 / 1024.0 / 1024.0:F2}GB > 2GB）");
+                    _logMessage($"エラー: ダウンロードサイズが大きすぎるのだ（{totalBytes / 1024.0 / 1024.0 / 1024.0:F2}GB > 2GB）");
                     throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                 }
                 else
                 {
-                    _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
+                    _logMessage($"ダウンロードサイズなのだ: {totalBytes / 1024 / 1024:F2} MB");
                 }
 
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
@@ -328,7 +328,7 @@ public class OllamaManager : IDisposable
                     totalBytesRead += bytesRead;
                     if (totalBytesRead > MaxDownloadSize)
                     {
-                        _logMessage($"エラー: ダウンロードサイズが上限を超えました");
+                        _logMessage($"エラー: ダウンロードサイズが上限を超えたのだ");
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
@@ -346,19 +346,19 @@ public class OllamaManager : IDisposable
                         
                         if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
                         {
-                            _logMessage($"ダウンロード進捗: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
+                            _logMessage($"ダウンロード進捗なのだ: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
                         }
                     }
                 }
             }
 
             _progressCallback?.Invoke(100);
-            _logMessage("ダウンロード完了");
+            _logMessage("ダウンロード完了なのだ");
             await Task.Delay(500);
 
             _isExtracting = true;
             _progressCallback?.Invoke(0);
-            _logMessage("Ollamaアーカイブを展開中...");
+            _logMessage("Ollamaアーカイブを展開中なのだ...");
             
             await Task.Run(() =>
             {
@@ -366,7 +366,7 @@ public class OllamaManager : IDisposable
                 var totalEntries = archive.Entries.Count;
                 var extractedCount = 0;
                 
-                _logMessage($"展開するファイル数: {totalEntries}");
+                _logMessage($"展開するファイル数なのだ: {totalEntries}");
                 
                 foreach (var entry in archive.Entries)
                 {
@@ -388,43 +388,43 @@ public class OllamaManager : IDisposable
                     if (extractedCount % 5 == 0 || extractedCount == totalEntries)
                     {
                         _progressCallback?.Invoke(progress);
-                        _logMessage($"展開中: {extractedCount}/{totalEntries} ファイル ({progress:F1}%)");
+                        _logMessage($"展開中なのだ: {extractedCount}/{totalEntries} ファイル ({progress:F1}%)");
                     }
                 }
             });
             
             _progressCallback?.Invoke(100);
             _isExtracting = false;
-            _logMessage("Ollamaの展開が完了しました。");
+            _logMessage("Ollamaの展開が完了したのだ。");
 
             await Task.Delay(500);
 
-            _logMessage("アーカイブファイルを削除中...");
+            _logMessage("アーカイブファイルを削除中なのだ...");
             try
             {
                 File.Delete(archivePath);
-                _logMessage("アーカイブファイルを削除しました。");
+                _logMessage("アーカイブファイルを削除したのだ。");
             }
             catch (IOException ex)
             {
-                _logMessage($"アーカイブファイルの削除に失敗しました: {ex.Message}");
+                _logMessage($"アーカイブファイルの削除に失敗したのだ: {ex.Message}");
             }
 
-            _logMessage("Ollama実行ファイルを確認中...");
+            _logMessage("Ollama実行ファイルを確認中なのだ...");
             var ollamaExe = Path.Combine(ollamaBaseDir, "ollama.exe");
             if (File.Exists(ollamaExe))
             {
                 _ollamaExePath = ollamaExe;
-                _logMessage($"Ollama実行ファイルを確認しました: {_ollamaExePath}");
+                _logMessage($"Ollama実行ファイルを確認したのだ: {_ollamaExePath}");
                 return true;
             }
 
-            _logMessage("Ollama実行ファイルが見つかりません。");
+            _logMessage("Ollama実行ファイルが見つからないのだ。");
             return false;
         }
         catch (Exception ex)
         {
-            _logMessage($"Ollamaのダウンロード/展開に失敗しました: {ex.Message}");
+            _logMessage($"Ollamaのダウンロード/展開に失敗したのだ: {ex.Message}");
             return false;
         }
     }
@@ -438,11 +438,11 @@ public class OllamaManager : IDisposable
         {
             if (string.IsNullOrEmpty(_ollamaExePath) || !File.Exists(_ollamaExePath))
             {
-                _logMessage("Ollama実行ファイルが見つかりません。");
+                _logMessage("Ollama実行ファイルが見つからないのだ。");
                 return;
             }
 
-            _logMessage("Ollamaサーバーを起動中...");
+            _logMessage("Ollamaサーバーを起動中なのだ...");
 
             var startInfo = new ProcessStartInfo
             {
@@ -465,17 +465,17 @@ public class OllamaManager : IDisposable
             if (!string.IsNullOrEmpty(gpuDevice) && gpuDevice != "0")
             {
                 startInfo.Environment["CUDA_VISIBLE_DEVICES"] = gpuDevice;
-                _logMessage($"GPU設定: CUDA_VISIBLE_DEVICES={gpuDevice}");
+                _logMessage($"GPU設定なのだ: CUDA_VISIBLE_DEVICES={gpuDevice}");
             }
             else
             {
-                _logMessage("GPU設定: 自動検出（CUDA_VISIBLE_DEVICES未設定）");
+                _logMessage("GPU設定: 自動検出なのだ（CUDA_VISIBLE_DEVICES未設定）");
             }
 
             _ollamaProcess = Process.Start(startInfo);
             if (_ollamaProcess != null)
             {
-                _logMessage("Ollamaサーバーを起動しました。");
+                _logMessage("Ollamaサーバーを起動したのだ。");
                 
                 _ollamaProcess.OutputDataReceived += (sender, e) =>
                 {
@@ -498,12 +498,12 @@ public class OllamaManager : IDisposable
             }
             else
             {
-                _logMessage("Ollamaプロセスの起動に失敗しました。");
+                _logMessage("Ollamaプロセスの起動に失敗したのだ。");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"Ollamaサーバー起動中にエラー: {ex.Message}");
+            _logMessage($"Ollamaサーバー起動中にエラーなのだ: {ex.Message}");
         }
     }
 
@@ -538,11 +538,11 @@ public class OllamaManager : IDisposable
         {
             if (string.IsNullOrEmpty(_ollamaExePath) || !File.Exists(_ollamaExePath))
             {
-                _logMessage("Ollama実行ファイルが見つかりません。");
+                _logMessage("Ollama実行ファイルが見つからないのだ。");
                 return;
             }
 
-            _logMessage($"モデル '{modelName}' をダウンロード中...");
+            _logMessage($"モデル '{modelName}' をダウンロード中なのだ...");
 
             var startInfo = new ProcessStartInfo
             {
@@ -582,17 +582,17 @@ public class OllamaManager : IDisposable
 
                 if (process.ExitCode == 0)
                 {
-                    _logMessage($"モデル '{modelName}' のダウンロードが完了しました。");
+                    _logMessage($"モデル '{modelName}' のダウンロードが完了したのだ。");
                 }
                 else
                 {
-                    _logMessage($"モデル '{modelName}' のダウンロードに失敗しました。");
+                    _logMessage($"モデル '{modelName}' のダウンロードに失敗したのだ。");
                 }
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"モデルダウンロード中にエラー: {ex.Message}");
+            _logMessage($"モデルダウンロード中にエラーなのだ: {ex.Message}");
         }
     }
 
@@ -630,7 +630,7 @@ public class OllamaManager : IDisposable
             {
                 try
                 {
-                    _logMessage("Ollamaサーバーを停止中...");
+                    _logMessage("Ollamaサーバーを停止中なのだ...");
                 }
                 catch
                 {
@@ -644,7 +644,7 @@ public class OllamaManager : IDisposable
                     {
                         try
                         {
-                            _logMessage("Ollamaプロセスの終了を待機中にタイムアウトしました。");
+                            _logMessage("Ollamaプロセスの終了を待機中にタイムアウトしたのだ。");
                         }
                         catch
                         {
@@ -710,7 +710,7 @@ public class OllamaManager : IDisposable
                     {
                         try
                         {
-                            _logMessage($"孤立したOllamaプロセスを終了します (PID: {process.Id})");
+                            _logMessage($"孤立したOllamaプロセスを終了するのだ (PID: {process.Id})");
                         }
                         catch
                         {
@@ -733,7 +733,7 @@ public class OllamaManager : IDisposable
                     // 予期しないエラーはログに記録
                     try
                     {
-                        _logMessage($"孤立プロセス終了中のエラー (PID: {process.Id}): {ex.Message}");
+                        _logMessage($"孤立プロセス終了中のエラーなのだ (PID: {process.Id}): {ex.Message}");
                     }
                     catch
                     {
@@ -751,7 +751,7 @@ public class OllamaManager : IDisposable
             // 孤立プロセスのクリーンアップ失敗時も具体的なエラーを記録
             try
             {
-                _logMessage($"孤立Ollamaプロセス取得エラー: {ex.Message}");
+                _logMessage($"孤立Ollamaプロセス取得エラーなのだ: {ex.Message}");
             }
             catch
             {

@@ -62,29 +62,29 @@ public partial class PythonEnvironmentManager
     {
         try
         {
-            _logMessage("Python環境初期化開始");
+            _logMessage("Python環境初期化開始なのだ");
             Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
-            _logMessage("エンコーディングプロバイダー登録完了");
+            _logMessage("エンコーディングプロバイダー登録完了なのだ");
             Environment.SetEnvironmentVariable("PYTHONIOENCODING", "utf-8");
-            _logMessage("環境変数設定完了");
+            _logMessage("環境変数設定完了なのだ");
 
             var found = await FindEmbeddedPythonAsync();
             if (found && !string.IsNullOrEmpty(_pythonExecutablePath))
             {
                 _pythonAvailable = true;
-                _logMessage($"Python実行ファイル: {_pythonExecutablePath}");
-                _logMessage("Python環境の初期化が完了しました");
+                _logMessage($"Python実行ファイルなのだ: {_pythonExecutablePath}");
+                _logMessage("Python環境の初期化が完了したのだ");
             }
             else
             {
                 _pythonAvailable = false;
-                _logMessage("埋め込みPythonの準備に失敗しました。");
+                _logMessage("埋め込みPythonの準備に失敗したのだ。");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"Python環境の初期化に失敗しました: {ex.Message}");
-            _logMessage($"スタックトレース: {ex.StackTrace}");
+            _logMessage($"Python環境の初期化に失敗したのだ: {ex.Message}");
+            _logMessage($"スタックトレースなのだ: {ex.StackTrace}");
             _pythonAvailable = false;
         }
     }
@@ -98,12 +98,12 @@ public partial class PythonEnvironmentManager
         try
         {
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            _logMessage($"アプリケーションディレクトリ: {appDirectory}");
+            _logMessage($"アプリケーションディレクトリなのだ: {appDirectory}");
             var managedEmbeddedPath = Path.Combine(appDirectory, "lib", "python", "python-embed");
-            _logMessage($"管理対象Pythonパス: {managedEmbeddedPath}");
+            _logMessage($"管理対象Pythonパスなのだ: {managedEmbeddedPath}");
 
             var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
-            _logMessage($"対象バージョン: {(string.IsNullOrEmpty(targetVersion) ? "なし" : targetVersion)}");
+            _logMessage($"対象バージョンなのだ: {(string.IsNullOrEmpty(targetVersion) ? "なし" : targetVersion)}");
 
             if (!string.IsNullOrEmpty(targetVersion))
             {
@@ -111,12 +111,12 @@ public partial class PythonEnvironmentManager
                 if (managedReady)
                 {
                     _pythonExecutablePath = Path.Combine(managedEmbeddedPath, "python.exe");
-                    _logMessage($"管理対象の埋め込みPythonを使用します: {_pythonExecutablePath}");
+                    _logMessage($"管理対象の埋め込みPythonを使用するのだ: {_pythonExecutablePath}");
                     return true;
                 }
             }
 
-            _logMessage("管理対象Pythonは利用できません。別の場所を検索します...");
+            _logMessage("管理対象Pythonは利用できないのだ。別の場所を検索するのだ...");
             var libPythonDir = Path.Combine(appDirectory, "lib", "python");
             if (Directory.Exists(libPythonDir))
             {
@@ -127,7 +127,7 @@ public partial class PythonEnvironmentManager
                     if (File.Exists(pythonExe))
                     {
                         _pythonExecutablePath = pythonExe;
-                        _logMessage($"lib/python内の埋め込みPythonを検出しました: {_pythonExecutablePath}");
+                        _logMessage($"lib/python内の埋め込みPythonを検出したのだ: {_pythonExecutablePath}");
                         return true;
                     }
                 }
@@ -138,11 +138,11 @@ public partial class PythonEnvironmentManager
             if (File.Exists(directExe))
             {
                 _pythonExecutablePath = directExe;
-                _logMessage($"直接的な埋め込みPythonを検出しました: {_pythonExecutablePath}");
+                _logMessage($"直接的な埋め込みPythonを検出したのだ: {_pythonExecutablePath}");
                 return true;
             }
 
-            _logMessage("組み込みPythonが見つからないため、ダウンロードを試行します。");
+            _logMessage("組み込みPythonが見つからないため、ダウンロードを試行するのだ。");
             if (await DownloadEmbeddedPythonAsync())
             {
                 return true;
@@ -152,7 +152,7 @@ public partial class PythonEnvironmentManager
         }
         catch (Exception ex)
         {
-            _logMessage($"埋め込みPython検出中に例外: {ex.Message}");
+            _logMessage($"埋め込みPython検出中に例外なのだ: {ex.Message}");
             return false;
         }
         finally
@@ -223,7 +223,7 @@ public partial class PythonEnvironmentManager
             }
             catch (Exception ex)
             {
-                _logMessage($"埋め込みPython更新中にエラー: {ex.Message}。既存のPythonを使用します。");
+                _logMessage($"埋め込みPython更新中にエラーなのだ: {ex.Message}。既存のPythonを使用するのだ。");
             }
         }
 
@@ -254,7 +254,7 @@ public partial class PythonEnvironmentManager
                 }
                 catch (Exception ex)
                 {
-                    _logMessage($"保存済みバージョン {savedVersion} の確認に失敗: {ex.Message}");
+                    _logMessage($"保存済みバージョン {savedVersion} の確認に失敗したのだ: {ex.Message}");
                 }
                 AppSettings.SetPythonVersion(null);
             }
@@ -281,11 +281,11 @@ public partial class PythonEnvironmentManager
 
         try
         {
-            _logMessage("埋め込みPythonのダウンロード準備を開始します。");
+            _logMessage("埋め込みPythonのダウンロード準備を開始するのだ。");
             var targetVersion = await ResolveDownloadablePythonVersionAsync();
             if (string.IsNullOrEmpty(targetVersion))
             {
-                _logMessage("最新のPythonバージョン情報を取得できませんでした。");
+                _logMessage("最新のPythonバージョン情報を取得できなかったのだ。");
                 return false;
             }
 
@@ -297,7 +297,7 @@ public partial class PythonEnvironmentManager
             {
                 EnableSitePackages(embeddedPythonPath);
                 _pythonExecutablePath = Path.Combine(embeddedPythonPath, "python.exe");
-                _logMessage($"既に埋め込みPythonが存在します: {_pythonExecutablePath}");
+                _logMessage($"既に埋め込みPythonが存在するのだ: {_pythonExecutablePath}");
                 return true;
             }
 
@@ -319,7 +319,7 @@ public partial class PythonEnvironmentManager
             }
             catch (Exception ex)
             {
-                _logMessage($"ディレクトリ作成エラー: {ex.Message}");
+                _logMessage($"ディレクトリ作成エラーなのだ: {ex.Message}");
                 // バックアップから復旧
                 if (Directory.Exists(embeddedPythonBackupPath))
                 {
@@ -334,7 +334,7 @@ public partial class PythonEnvironmentManager
 
             if (!File.Exists(zipPath))
             {
-                _logMessage($"埋め込みPythonをダウンロード中: {downloadUrl}");
+                _logMessage($"埋め込みPythonをダウンロード中なのだ: {downloadUrl}");
                 _progressCallback?.Invoke(0);
 
                 using var response = await HttpClientForVersion.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead);
@@ -347,16 +347,16 @@ public partial class PythonEnvironmentManager
 
                 if (totalBytes <= 0)
                 {
-                    _logMessage("警告: ダウンロードサイズが不明です。続行します。");
+                    _logMessage("警告: ダウンロードサイズが不明なのだ。続行するのだ。");
                 }
                 else if (totalBytes > MaxDownloadSize)
                 {
-                    _logMessage($"エラー: ダウンロードサイズが大きすぎます（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
+                    _logMessage($"エラー: ダウンロードサイズが大きすぎるのだ（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
                     throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                 }
                 else
                 {
-                    _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
+                    _logMessage($"ダウンロードサイズなのだ: {totalBytes / 1024 / 1024:F2} MB");
                 }
 
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
@@ -373,7 +373,7 @@ public partial class PythonEnvironmentManager
                     totalBytesRead += bytesRead;
                     if (totalBytesRead > MaxDownloadSize)
                     {
-                        _logMessage($"エラー: ダウンロードサイズが上限を超えました");
+                        _logMessage($"エラー: ダウンロードサイズが上限を超えたのだ");
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
@@ -391,7 +391,7 @@ public partial class PythonEnvironmentManager
                         
                         if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
                         {
-                            _logMessage($"ダウンロード進捗: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
+                            _logMessage($"ダウンロード進捗なのだ: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
                         }
                     }
                 }
@@ -399,7 +399,7 @@ public partial class PythonEnvironmentManager
                 _progressCallback?.Invoke(100);
             }
 
-            _logMessage("埋め込みPythonを展開中...");
+            _logMessage("埋め込みPythonを展開中なのだ...");
             _progressCallback?.Invoke(0);
             await Task.Delay(500);
 
@@ -410,7 +410,7 @@ public partial class PythonEnvironmentManager
             }
             catch (Exception ex)
             {
-                _logMessage($"展開エラー: {ex.Message}");
+                _logMessage($"展開エラーなのだ: {ex.Message}");
                 // バックアップから復旧
                 if (Directory.Exists(embeddedPythonBackupPath))
                 {
@@ -419,7 +419,7 @@ public partial class PythonEnvironmentManager
                         Directory.Delete(embeddedPythonPath, true);
                     }
                     Directory.Move(embeddedPythonBackupPath, embeddedPythonPath);
-                    _logMessage("バックアップから復旧しました。");
+                    _logMessage("バックアップから復旧したのだ。");
                 }
                 return false;
             }
@@ -429,7 +429,7 @@ public partial class PythonEnvironmentManager
 
             if (!IsEmbeddedPythonReady(embeddedPythonPath))
             {
-                _logMessage("埋め込みPythonの展開に失敗しました。");
+                _logMessage("埋め込みPythonの展開に失敗したのだ。");
                 // バックアップから復旧
                 if (Directory.Exists(embeddedPythonBackupPath))
                 {
@@ -438,7 +438,7 @@ public partial class PythonEnvironmentManager
                         Directory.Delete(embeddedPythonPath, true);
                     }
                     Directory.Move(embeddedPythonBackupPath, embeddedPythonPath);
-                    _logMessage("バックアップから復旧しました。");
+                    _logMessage("バックアップから復旧したのだ。");
                 }
                 return false;
             }
@@ -452,19 +452,19 @@ public partial class PythonEnvironmentManager
                 }
                 catch
                 {
-                    _logMessage("バックアップ削除エラー（処理は継続）");
+                    _logMessage("バックアップ削除エラーなのだ（処理は継続するのだ）");
                 }
             }
 
             WriteEmbeddedPythonVersion(versionFilePath, targetVersion);
             AppSettings.SetPythonVersion(targetVersion);
             _pythonExecutablePath = Path.Combine(embeddedPythonPath, "python.exe");
-            _logMessage($"埋め込みPythonの準備が完了しました: {_pythonExecutablePath}");
+            _logMessage($"埋め込みPythonの準備が完了したのだ: {_pythonExecutablePath}");
             return true;
         }
         catch (Exception ex)
         {
-            _logMessage($"埋め込みPythonのダウンロード/展開に失敗しました: {ex.Message}");
+            _logMessage($"埋め込みPythonのダウンロード/展開に失敗したのだ: {ex.Message}");
             // バックアップから復旧（内側のtryで処理されなかった場合）
             try
             {
@@ -475,12 +475,12 @@ public partial class PythonEnvironmentManager
                         Directory.Delete(embeddedPythonPath, true);
                     }
                     Directory.Move(embeddedPythonBackupPath, embeddedPythonPath);
-                    _logMessage("バックアップから復旧しました。");
+                    _logMessage("バックアップから復旧したのだ。");
                 }
             }
             catch
             {
-                _logMessage("復旧に失敗しました。");
+                _logMessage("復旧に失敗したのだ。");
             }
             return false;
         }
@@ -556,14 +556,14 @@ public partial class PythonEnvironmentManager
 
         try
         {
-            _logMessage("pip を導入するため get-pip.py をダウンロード中...");
+            _logMessage("pip を導入するため get-pip.py をダウンロード中なのだ...");
             const string getPipUrl = "https://bootstrap.pypa.io/get-pip.py";
             using var response = await HttpClientForVersion.GetAsync(getPipUrl);
             response.EnsureSuccessStatusCode();
             var script = await response.Content.ReadAsStringAsync();
             await File.WriteAllTextAsync(getPipPath, script);
 
-            _logMessage("get-pip.py を実行中...");
+            _logMessage("get-pip.py を実行中なのだ...");
             var startInfo = new System.Diagnostics.ProcessStartInfo
             {
                 FileName = pythonExe,
@@ -577,7 +577,7 @@ public partial class PythonEnvironmentManager
             using var process = System.Diagnostics.Process.Start(startInfo);
             if (process is null)
             {
-                _logMessage("get-pip.py の起動に失敗しました。");
+                _logMessage("get-pip.py の起動に失敗したのだ。");
                 return;
             }
 
@@ -592,7 +592,7 @@ public partial class PythonEnvironmentManager
 
             if (process.ExitCode != 0)
             {
-                _logMessage($"get-pip 終了コード: {process.ExitCode}");
+                _logMessage($"get-pip 終了コードなのだ: {process.ExitCode}");
                 if (!string.IsNullOrWhiteSpace(error))
                 {
                     _logMessage($"get-pip エラー: {error.Trim()}");
@@ -600,12 +600,12 @@ public partial class PythonEnvironmentManager
             }
             else
             {
-                _logMessage("pip の導入が完了しました。");
+                _logMessage("pip の導入が完了したのだ。");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"pip 導入中にエラー: {ex.Message}");
+            _logMessage($"pip 導入中にエラーなのだ: {ex.Message}");
         }
         finally
         {
@@ -664,7 +664,7 @@ public partial class PythonEnvironmentManager
         }
         catch (Exception ex)
         {
-            _logMessage($"最新Pythonバージョン取得に失敗: {ex.Message}");
+            _logMessage($"最新Pythonバージョン取得に失敗したのだ: {ex.Message}");
             return null;
         }
     }
@@ -695,7 +695,7 @@ public partial class PythonEnvironmentManager
         }
         catch (Exception ex)
         {
-            _logMessage($"ダウンロード可否確認エラー ({version}): {ex.Message}");
+            _logMessage($"ダウンロード可否確認エラーなのだ ({version}): {ex.Message}");
             return false;
         }
     }

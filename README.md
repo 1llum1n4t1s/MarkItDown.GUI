@@ -10,6 +10,7 @@
   - Reddit: JSON API による高速取得
   - その他のサイト: Playwright + Ollamaガイド型で動的コンテンツ（ページネーション・無限スクロール等）にも対応
 - **自動環境構築**: Python環境、FFmpeg、Ollamaを初回起動時に自動でダウンロード・セットアップ
+- **OSの環境を汚さないポータブル設計**: Python・FFmpeg・Ollama・LLMモデルなど全ての依存コンポーネントをアプリ内の `lib/` フォルダに格納。システムのPATH・レジストリ・既存のPython環境には一切影響しません。アンインストール時もフォルダ削除だけで完全にクリーンアップできます
 - **Ollama連携 (gemma3:4b)**: ローカルLLM を使用した画像説明の自動生成、Markdown整形、スクレイピング戦略分析を統合
 - **LLMによる自動整形**: 全ファイル形式の変換結果をOllamaで自動的に整形（元データを損失しない軽量プロンプト）
 - **並列処理**: 最大3ファイルの同時変換で高速処理
@@ -171,7 +172,16 @@ Ollamaと **gemma3:4b**（Google製マルチモーダルモデル）を使用し
 | openai | OllamaのOpenAI互換API利用（pip自動インストール・更新） | Python site-packages |
 | playwright | Webスクレイピング用ブラウザ自動化（pip自動インストール・更新） | Python site-packages |
 
-Python環境は公式の埋め込み版を使用し、システムのPython環境には影響しません。
+### OSの環境を汚さないポータブル設計
+
+全ての依存コンポーネントはアプリケーションフォルダ内の `lib/` 配下に自己完結して格納されます。
+
+- **Python**: 公式の埋め込み版（Windows Embeddable Package）を使用。システムにインストール済みのPython環境には一切干渉しません
+- **Pythonパッケージ**: markitdown、openai、playwright等は埋め込みPython専用の site-packages にインストールされます
+- **FFmpeg**: `lib/ffmpeg/` に格納。システムのPATHやレジストリは変更しません
+- **Ollama & LLMモデル**: `lib/ollama/` に格納。システムにインストールされたOllamaとは独立して動作します
+
+アンインストール時はアプリケーションフォルダを削除するだけで、OS上に痕跡を残しません。
 
 起動時にこれらのPythonパッケージの最新バージョンが自動的に確認・更新されます。
 

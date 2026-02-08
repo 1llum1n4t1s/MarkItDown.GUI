@@ -55,10 +55,10 @@ public partial class FfmpegManager
         await _ffmpegDetectionSemaphore.WaitAsync();
         try
         {
-            _logMessage("ffmpeg 環境の初期化を開始します。");
+            _logMessage("ffmpeg 環境の初期化を開始するのだ。");
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
             var ffmpegBaseDir = Path.Combine(appDirectory, "lib", "ffmpeg");
-            _logMessage($"ffmpeg ディレクトリ: {ffmpegBaseDir}");
+            _logMessage($"ffmpeg ディレクトリなのだ: {ffmpegBaseDir}");
 
             if (Directory.Exists(ffmpegBaseDir))
             {
@@ -71,26 +71,26 @@ public partial class FfmpegManager
                     {
                         _ffmpegPath = binDir;
                         _ffmpegAvailable = true;
-                        _logMessage($"既存の ffmpeg を検出しました: {_ffmpegPath}");
+                        _logMessage($"既存の ffmpeg を検出したのだ: {_ffmpegPath}");
                         return;
                     }
                 }
             }
 
-            _logMessage("埋め込み ffmpeg が見つからないため、ダウンロードを試行します。");
+            _logMessage("埋め込み ffmpeg が見つからないため、ダウンロードを試行するのだ。");
             if (await DownloadAndExtractFfmpegAsync(ffmpegBaseDir))
             {
                 _ffmpegAvailable = true;
-                _logMessage($"ffmpeg の準備が完了しました: {_ffmpegPath}");
+                _logMessage($"ffmpeg の準備が完了したのだ: {_ffmpegPath}");
             }
             else
             {
-                _logMessage("ffmpeg の準備に失敗しました。音声ファイルの変換に制限が発生する可能性があります。");
+                _logMessage("ffmpeg の準備に失敗したのだ。音声ファイルの変換に制限が発生する可能性があるのだ。");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"ffmpeg 初期化中に例外: {ex.Message}");
+            _logMessage($"ffmpeg 初期化中に例外なのだ: {ex.Message}");
         }
         finally
         {
@@ -105,14 +105,14 @@ public partial class FfmpegManager
     {
         try
         {
-            _logMessage("gyan.dev から ffmpeg release essentials をダウンロード中...");
+            _logMessage("gyan.dev から ffmpeg release essentials をダウンロード中なのだ...");
             const string downloadUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.7z";
             const string fileName = "ffmpeg-release-essentials.7z";
 
             Directory.CreateDirectory(ffmpegBaseDir);
             var archivePath = Path.Combine(ffmpegBaseDir, fileName);
 
-            _logMessage($"ffmpeg をダウンロード中: {downloadUrl}");
+            _logMessage($"ffmpeg をダウンロード中なのだ: {downloadUrl}");
             _progressCallback?.Invoke(0);
             
             using (var response = await HttpClientForDownload.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
@@ -126,16 +126,16 @@ public partial class FfmpegManager
 
                 if (totalBytes <= 0)
                 {
-                    _logMessage("警告: ダウンロードサイズが不明です。続行します。");
+                    _logMessage("警告: ダウンロードサイズが不明なのだ。続行するのだ。");
                 }
                 else if (totalBytes > MaxDownloadSize)
                 {
-                    _logMessage($"エラー: ダウンロードサイズが大きすぎます（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
+                    _logMessage($"エラー: ダウンロードサイズが大きすぎるのだ（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
                     throw new InvalidOperationException($"ダウンロードサイズが上限を超えています");
                 }
                 else
                 {
-                    _logMessage($"ダウンロードサイズ: {totalBytes / 1024 / 1024:F2} MB");
+                    _logMessage($"ダウンロードサイズなのだ: {totalBytes / 1024 / 1024:F2} MB");
                 }
 
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
@@ -152,7 +152,7 @@ public partial class FfmpegManager
                     totalBytesRead += bytesRead;
                     if (totalBytesRead > MaxDownloadSize)
                     {
-                        _logMessage($"エラー: ダウンロードサイズが上限を超えました");
+                        _logMessage($"エラー: ダウンロードサイズが上限を超えたのだ");
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
@@ -170,7 +170,7 @@ public partial class FfmpegManager
                         
                         if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
                         {
-                            _logMessage($"ダウンロード進捗: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
+                            _logMessage($"ダウンロード進捗なのだ: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
                         }
                     }
                 }
@@ -178,57 +178,57 @@ public partial class FfmpegManager
             
             _progressCallback?.Invoke(100);
 
-            _logMessage("ダウンロード完了、ファイルハンドルを解放中...");
+            _logMessage("ダウンロード完了なのだ、ファイルハンドルを解放中なのだ...");
             await Task.Delay(200);
 
-            _logMessage("ffmpeg を展開中...");
+            _logMessage("ffmpeg を展開中なのだ...");
             _progressCallback?.Invoke(0);
             await Task.Delay(500);
             await ExtractSevenZipAsync(archivePath, ffmpegBaseDir);
             _progressCallback?.Invoke(100);
 
-            _logMessage("展開完了後の待機中...");
+            _logMessage("展開完了後の待機中なのだ...");
             await Task.Delay(500);
 
             try
             {
                 File.Delete(archivePath);
-                _logMessage("アーカイブファイルを削除しました。");
+                _logMessage("アーカイブファイルを削除したのだ。");
             }
             catch (IOException ex)
             {
-                _logMessage($"アーカイブファイルの削除に失敗しました（処理は継続）: {ex.Message}");
+                _logMessage($"アーカイブファイルの削除に失敗したのだ（処理は継続するのだ）: {ex.Message}");
             }
 
             var extractedDirs = Directory.GetDirectories(ffmpegBaseDir, "ffmpeg-*");
             if (extractedDirs.Length > 0)
             {
-                _logMessage($"展開されたディレクトリ: {string.Join(", ", extractedDirs.Select(Path.GetFileName))}");
+                _logMessage($"展開されたディレクトリなのだ: {string.Join(", ", extractedDirs.Select(Path.GetFileName))}");
                 var binDir = Path.Combine(extractedDirs[0], "bin");
                 if (Directory.Exists(binDir) && File.Exists(Path.Combine(binDir, "ffmpeg.exe")))
                 {
                     _ffmpegPath = binDir;
-                    _logMessage($"ffmpeg の展開が完了しました: {_ffmpegPath}");
+                    _logMessage($"ffmpeg の展開が完了したのだ: {_ffmpegPath}");
                     return true;
                 }
-                _logMessage($"binディレクトリが見つかりません: {binDir}");
+                _logMessage($"binディレクトリが見つからないのだ: {binDir}");
             }
             else
             {
-                _logMessage($"ffmpeg-* パターンのディレクトリが見つかりません。");
+                _logMessage($"ffmpeg-* パターンのディレクトリが見つからないのだ。");
                 var allDirs = Directory.GetDirectories(ffmpegBaseDir);
                 if (allDirs.Length > 0)
                 {
-                    _logMessage($"存在するディレクトリ: {string.Join(", ", allDirs.Select(Path.GetFileName))}");
+                    _logMessage($"存在するディレクトリなのだ: {string.Join(", ", allDirs.Select(Path.GetFileName))}");
                 }
             }
 
-            _logMessage("ffmpeg の展開に失敗しました。");
+            _logMessage("ffmpeg の展開に失敗したのだ。");
             return false;
         }
         catch (Exception ex)
         {
-            _logMessage($"ffmpeg のダウンロード/展開に失敗しました: {ex.Message}");
+            _logMessage($"ffmpeg のダウンロード/展開に失敗したのだ: {ex.Message}");
             return false;
         }
     }
@@ -247,15 +247,15 @@ public partial class FfmpegManager
             {
                 await Task.Run(() =>
                 {
-                    _logMessage($"7zアーカイブを展開中: {archivePath} (試行 {retryCount + 1}/{maxRetries})");
+                    _logMessage($"7zアーカイブを展開中なのだ: {archivePath} (試行 {retryCount + 1}/{maxRetries})");
                     
                     using (var reader = new ArchiveReader(archivePath))
                     {
-                        _logMessage($"展開先: {destinationDir}");
+                        _logMessage($"展開先なのだ: {destinationDir}");
                         reader.Save(destinationDir);
                     }
                     
-                    _logMessage("7zアーカイブの展開が完了しました。");
+                    _logMessage("7zアーカイブの展開が完了したのだ。");
                 });
                 
                 GC.Collect();
@@ -266,7 +266,7 @@ public partial class FfmpegManager
             catch (IOException ex) when (retryCount < maxRetries - 1)
             {
                 retryCount++;
-                _logMessage($"ファイルアクセスエラー（リトライ {retryCount}/{maxRetries}）: {ex.Message}");
+                _logMessage($"ファイルアクセスエラーなのだ（リトライ {retryCount}/{maxRetries}）: {ex.Message}");
                 await Task.Delay(1000);
             }
         }

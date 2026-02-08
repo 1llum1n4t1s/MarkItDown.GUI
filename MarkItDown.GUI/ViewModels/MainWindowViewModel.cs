@@ -12,7 +12,7 @@ namespace MarkItDown.GUI.ViewModels;
 /// </summary>
 public class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    private string _logText = "アプリケーションが起動しました...";
+    private string _logText = "アプリケーションが起動したのだ...";
     private IBrush _dropZoneBackground;
     private FileProcessor? _fileProcessor;
     private OllamaManager? _ollamaManager;
@@ -115,7 +115,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             if (task.IsFaulted)
             {
                 var ex = task.Exception?.GetBaseException();
-                LogMessage($"初期化エラー: {ex?.Message}");
+                LogMessage($"初期化エラーなのだ: {ex?.Message}");
             }
         }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
     }
@@ -134,7 +134,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
             if (!pythonEnvironmentManager.IsPythonAvailable)
             {
-                LogMessage("Python環境の初期化に失敗しました。");
+                LogMessage("Python環境の初期化に失敗したのだ。");
                 return;
             }
 
@@ -172,11 +172,11 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             _webScraperService.SetPlaywrightScraper(playwrightScraper);
 
             UpdateProcessingStatus("初期化完了");
-            LogMessage("すべての初期化が完了しました。");
+            LogMessage("すべての初期化が完了したのだ！");
         }
         catch (Exception ex)
         {
-            LogMessage($"初期化中にエラーが発生しました: {ex.Message}");
+            LogMessage($"初期化中にエラーが発生したのだ: {ex.Message}");
             Logger.LogException("初期化中にエラーが発生しました", ex);
         }
         finally
@@ -297,7 +297,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
         if (_fileProcessor is null)
         {
-            LogMessage("初期化が完了していません。しばらくお待ちください。");
+            LogMessage("初期化が完了していないのだ。しばらく待つのだ。");
             return;
         }
 
@@ -329,13 +329,13 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         var url = UrlInput?.Trim();
         if (string.IsNullOrWhiteSpace(url))
         {
-            LogMessage("URLが入力されていません。");
+            LogMessage("URLが入力されていないのだ。");
             return;
         }
 
         if (_webScraperService is null)
         {
-            LogMessage("初期化が完了していません。しばらくお待ちください。");
+            LogMessage("初期化が完了していないのだ。しばらく待つのだ。");
             return;
         }
 
@@ -347,21 +347,21 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             var outputPath = System.IO.Path.Combine(outputDirectory, fileName);
 
             await _webScraperService.ScrapeAsync(url, outputPath);
-            LogMessage($"抽出完了: {outputPath}");
+            LogMessage($"抽出完了なのだ: {outputPath}");
             UrlInput = string.Empty;
         }
         catch (HttpRequestException ex)
         {
-            LogMessage($"HTTP通信エラー: {ex.Message}");
+            LogMessage($"HTTP通信エラーなのだ: {ex.Message}");
             Logger.LogException("URL抽出中にHTTPエラーが発生しました", ex);
         }
         catch (ArgumentException ex)
         {
-            LogMessage($"URL解析エラー: {ex.Message}");
+            LogMessage($"URL解析エラーなのだ: {ex.Message}");
         }
         catch (Exception ex)
         {
-            LogMessage($"URL抽出中にエラーが発生しました: {ex.Message}");
+            LogMessage($"URL抽出中にエラーが発生したのだ: {ex.Message}");
             Logger.LogException("URL抽出中にエラーが発生しました", ex);
         }
         finally
@@ -534,7 +534,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 try
                 {
-                    LogMessage($"リソース解放中にエラー: {ex.Message}");
+                    LogMessage($"リソース解放中にエラーなのだ: {ex.Message}");
                 }
                 catch
                 {

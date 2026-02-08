@@ -41,11 +41,11 @@ public class MarkItDownProcessor
     {
         try
         {
-            _logMessage("MarkItDownライブラリチェック開始");
+            _logMessage("MarkItDownライブラリチェック開始なのだ");
                 
             // アプリケーションディレクトリを取得
             var appDir = Directory.GetCurrentDirectory();
-            _logMessage($"C#側アプリケーションディレクトリ: {appDir}");
+            _logMessage($"C#側アプリケーションディレクトリなのだ: {appDir}");
                 
             // Pythonスクリプトを作成して実行
             var checkScript = CreateMarkItDownCheckScript(appDir);
@@ -54,7 +54,7 @@ public class MarkItDownProcessor
             try
             {
                 File.WriteAllText(scriptPath, checkScript, Encoding.UTF8);
-                _logMessage("チェックスクリプト作成完了");
+                _logMessage("チェックスクリプト作成完了なのだ");
                 _logMessage($"スクリプトパス: {scriptPath}");
                 _logMessage($"スクリプト内容:\n{checkScript}");
                     
@@ -74,7 +74,7 @@ public class MarkItDownProcessor
                 {
                     var currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
                     startInfo.Environment["PATH"] = $"{_ffmpegBinPath};{currentPath}";
-                    _logMessage($"ffmpeg PATH設定: {_ffmpegBinPath}");
+                    _logMessage($"ffmpeg PATH設定なのだ: {_ffmpegBinPath}");
                 }
 
                 // Use argument list for secure command execution (prevents command injection)
@@ -100,7 +100,7 @@ public class MarkItDownProcessor
 
                     if (!exited)
                     {
-                        _logMessage("MarkItDownライブラリチェックがタイムアウトしました。プロセスを強制終了します。");
+                        _logMessage("MarkItDownライブラリチェックがタイムアウトしたのだ。プロセスを強制終了するのだ。");
                         try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
                         return false;
                     }
@@ -116,18 +116,18 @@ public class MarkItDownProcessor
 
                     if (process.ExitCode == 0)
                     {
-                        _logMessage("MarkItDownライブラリチェック完了 - 利用可能");
+                        _logMessage("MarkItDownライブラリチェック完了なのだ - 利用可能なのだ");
                         return true;
                     }
                     else
                     {
-                        _logMessage($"MarkItDownライブラリチェック失敗 - 終了コード: {process.ExitCode}");
+                        _logMessage($"MarkItDownライブラリチェック失敗なのだ - 終了コード: {process.ExitCode}");
                         return false;
                     }
                 }
                 else
                 {
-                    _logMessage("Pythonプロセスの開始に失敗しました");
+                    _logMessage("Pythonプロセスの開始に失敗したのだ");
                     _logMessage($"Python実行パス: {_pythonExecutablePath}");
                     _logMessage($"スクリプトパス: {scriptPath}");
                     _logMessage($"スクリプトファイル存在: {File.Exists(scriptPath)}");
@@ -145,14 +145,14 @@ public class MarkItDownProcessor
                     }
                     catch (Exception ex)
                     {
-                        _logMessage($"一時ファイル削除に失敗: {ex.Message}");
+                        _logMessage($"一時ファイル削除に失敗したのだ: {ex.Message}");
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"MarkItDownライブラリチェック中にエラー: {ex.Message}");
+            _logMessage($"MarkItDownライブラリチェック中にエラーなのだ: {ex.Message}");
             return false;
         }
     }
@@ -171,11 +171,11 @@ public class MarkItDownProcessor
                 
             if (!File.Exists(scriptPath))
             {
-                _logMessage("convert_files.pyが見つかりません");
+                _logMessage("convert_files.pyが見つからないのだ");
                 return;
             }
                 
-            _logMessage("Pythonスクリプト実行開始");
+            _logMessage("Pythonスクリプト実行開始なのだ");
             _logMessage($"スクリプトパス: {scriptPath}");
             _logMessage($"ファイルパスJSON: {filePathsJson}");
             _logMessage($"フォルダパスJSON: {folderPathsJson}");
@@ -244,23 +244,23 @@ public class MarkItDownProcessor
 
                 if (!exited)
                 {
-                    _logMessage("ファイル変換がタイムアウトしました。プロセスを強制終了します。");
+                    _logMessage("ファイル変換がタイムアウトしたのだ。プロセスを強制終了するのだ。");
                     try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
                 }
                 else
                 {
-                    _logMessage($"Pythonスクリプト実行完了 - 終了コード: {process.ExitCode}");
+                    _logMessage($"Pythonスクリプト実行完了なのだ - 終了コード: {process.ExitCode}");
                 }
             }
             else
             {
-                _logMessage("Pythonプロセスの開始に失敗しました");
+                _logMessage("Pythonプロセスの開始に失敗したのだ");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"Pythonスクリプト実行中にエラー: {ex.Message}");
-            _logMessage($"スタックトレース: {ex.StackTrace}");
+            _logMessage($"Pythonスクリプト実行中にエラーなのだ: {ex.Message}");
+            _logMessage($"スタックトレースなのだ: {ex.StackTrace}");
         }
     }
 

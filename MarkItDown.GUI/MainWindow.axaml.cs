@@ -108,13 +108,13 @@ public partial class MainWindow : Avalonia.Controls.Window
         var url = ViewModel.UrlInput?.Trim();
         if (string.IsNullOrWhiteSpace(url))
         {
-            ViewModel.LogMessage("URLが入力されていません。");
+            ViewModel.LogMessage("URLが入力されていないのだ。");
             return;
         }
 
         if (StorageProvider is not { } storageProvider)
         {
-            ViewModel.LogMessage("フォルダ選択機能がこのプラットフォームでは利用できません。");
+            ViewModel.LogMessage("フォルダ選択機能がこのプラットフォームでは利用できないのだ。");
             return;
         }
 
@@ -127,12 +127,12 @@ public partial class MainWindow : Avalonia.Controls.Window
 
         if (folders.Count == 0)
         {
-            ViewModel.LogMessage("保存先ディレクトリが選択されませんでした。");
+            ViewModel.LogMessage("保存先ディレクトリが選択されなかったのだ。");
             return;
         }
 
         var selectedFolder = folders[0].Path.LocalPath;
-        ViewModel.LogMessage($"保存先: {selectedFolder}");
+        ViewModel.LogMessage($"保存先: {selectedFolder} なのだ");
 
         await ViewModel.ExtractUrlAsync(selectedFolder);
     }

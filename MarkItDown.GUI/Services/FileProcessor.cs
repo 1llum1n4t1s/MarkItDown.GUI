@@ -97,7 +97,7 @@ public class FileProcessor
                     folders.Add(fullPath);
                     break;
                 default:
-                    _logMessage($"Invalid path rejected: {path}");
+                    _logMessage($"無効なパスを拒否したのだ: {path}");
                     break;
             }
         }
@@ -118,28 +118,28 @@ public class FileProcessor
         try
         {
             // MarkItDownライブラリの利用可能性を事前にチェック
-            _logMessage("MarkItDownライブラリの利用可能性をチェック中...");
+            _logMessage("MarkItDownライブラリの利用可能性をチェック中なのだ...");
             if (!_markItDownProcessor.CheckMarkItDownAvailability())
             {
-                _logMessage("MarkItDownライブラリが利用できませんでした。処理を中止します。");
+                _logMessage("MarkItDownライブラリが利用できなかったのだ。処理を中止するのだ。");
                 return;
             }
-            _logMessage("MarkItDownライブラリが利用可能です。処理を開始します。");
+            _logMessage("MarkItDownライブラリが利用可能なのだ。処理を開始するのだ！");
 
             // デバッグ情報を表示
-            _logMessage($"処理開始: ファイル {files.Count}個, フォルダ {folders.Count}個");
+            _logMessage($"処理開始なのだ: ファイル {files.Count}個, フォルダ {folders.Count}個");
             foreach (var file in files)
             {
-                _logMessage($"処理対象ファイル: {file}");
+                _logMessage($"処理対象ファイルなのだ: {file}");
             }
             foreach (var folder in folders)
             {
-                _logMessage($"処理対象フォルダ: {folder}");
+                _logMessage($"処理対象フォルダなのだ: {folder}");
             }
 
             // アプリケーションディレクトリを取得
             var appDir = Directory.GetCurrentDirectory();
-            _logMessage($"C#側アプリケーションディレクトリ: {appDir}");
+            _logMessage($"C#側アプリケーションディレクトリなのだ: {appDir}");
 
             // ファイル・フォルダを並列処理
             // 最大3タスク同時実行で制限
@@ -177,12 +177,12 @@ public class FileProcessor
                 }
             }
 
-            _logMessage("すべてのファイル・フォルダ処理が完了しました。");
+            _logMessage("すべてのファイル・フォルダ処理が完了したのだ！");
         }
         catch (Exception ex)
         {
-            _logMessage($"MarkItDown変換中にエラーが発生: {ex.Message}");
-            _logMessage($"スタックトレース: {ex.StackTrace}");
+            _logMessage($"MarkItDown変換中にエラーが発生したのだ: {ex.Message}");
+            _logMessage($"スタックトレースなのだ: {ex.StackTrace}");
         }
     }
 
@@ -198,12 +198,12 @@ public class FileProcessor
 
         try
         {
-            _logMessage($"ファイル処理開始: {filePath}");
+            _logMessage($"ファイル処理開始なのだ: {filePath}");
 
             // キャッシュをチェック - 既に処理済みの場合はスキップ
             if (IsFileAlreadyProcessed(filePath))
             {
-                _logMessage($"ファイルをスキップしました: {filePath}");
+                _logMessage($"ファイルをスキップしたのだ: {filePath}");
                 return;
             }
 
@@ -226,11 +226,11 @@ public class FileProcessor
 
             // Pythonスクリプトを実行
             await Task.Run(() => _markItDownProcessor.ExecuteMarkItDownConvertScript(appDir, tempFilePathsJson, tempFolderPathsJson));
-            _logMessage($"ファイル処理完了: {filePath}");
+            _logMessage($"ファイル処理完了なのだ: {filePath}");
         }
         catch (Exception ex)
         {
-            _logMessage($"ファイル処理エラー ({filePath}): {ex.Message}");
+            _logMessage($"ファイル処理エラーなのだ ({filePath}): {ex.Message}");
         }
         finally
         {
@@ -251,7 +251,7 @@ public class FileProcessor
 
         try
         {
-            _logMessage($"フォルダ処理開始: {folderPath}");
+            _logMessage($"フォルダ処理開始なのだ: {folderPath}");
 
             // 単一フォルダのリストを作成
             var files = new string[] { };
@@ -272,11 +272,11 @@ public class FileProcessor
 
             // Pythonスクリプトを実行
             await Task.Run(() => _markItDownProcessor.ExecuteMarkItDownConvertScript(appDir, tempFilePathsJson, tempFolderPathsJson));
-            _logMessage($"フォルダ処理完了: {folderPath}");
+            _logMessage($"フォルダ処理完了なのだ: {folderPath}");
         }
         catch (Exception ex)
         {
-            _logMessage($"フォルダ処理エラー ({folderPath}): {ex.Message}");
+            _logMessage($"フォルダ処理エラーなのだ ({folderPath}): {ex.Message}");
         }
         finally
         {
@@ -297,12 +297,12 @@ public class FileProcessor
             if (File.Exists(path))
             {
                 File.Delete(path);
-                _logMessage($"一時ファイルを削除しました: {path}");
+                _logMessage($"一時ファイルを削除したのだ: {path}");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"一時ファイル削除に失敗: {ex.Message}");
+            _logMessage($"一時ファイル削除に失敗したのだ: {ex.Message}");
         }
     }
 
@@ -327,7 +327,7 @@ public class FileProcessor
             // UTC時刻を使用してシステム時刻ズレに対応
             if (cached.ticks == currentModifiedTime.Ticks && (DateTime.UtcNow - cached.timestamp).TotalSeconds < 300)
             {
-                _logMessage($"キャッシュ: {Path.GetFileName(filePath)} は既に処理済みです。");
+                _logMessage($"キャッシュ: {Path.GetFileName(filePath)} は既に処理済みなのだ。");
                 return true;
             }
         }

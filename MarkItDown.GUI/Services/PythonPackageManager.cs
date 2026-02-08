@@ -37,7 +37,7 @@ public class PythonPackageManager
         }
         catch (Exception ex)
         {
-            _logMessage($"パッケージインストールでエラー: {ex.Message}");
+            _logMessage($"パッケージインストールでエラーなのだ: {ex.Message}");
         }
     }
 
@@ -55,14 +55,14 @@ public class PythonPackageManager
             }
             else
             {
-                _logMessage("openaiパッケージの最新バージョンを確認中...");
+                _logMessage("openaiパッケージの最新バージョンを確認中なのだ...");
             }
             // --upgrade 付きで実行し、未インストール時はインストール、インストール済み時は最新に更新
             await InstallPackageWithPipAsync("openai");
         }
         catch (Exception ex)
         {
-            _logMessage($"openai確認処理でエラー: {ex.Message}");
+            _logMessage($"openai確認処理でエラーなのだ: {ex.Message}");
         }
     }
 
@@ -118,11 +118,11 @@ public class PythonPackageManager
             // パッケージ名の入力検証（英数字、アンダースコア、ハイフンのみ許可）
             if (!System.Text.RegularExpressions.Regex.IsMatch(packageName, @"^[a-zA-Z0-9_-]+$"))
             {
-                _logMessage($"不正なパッケージ名: {packageName}");
+                _logMessage($"不正なパッケージ名なのだ: {packageName}");
                 return;
             }
 
-            _logMessage($"pipで{packageName}をインストール/更新中...");
+            _logMessage($"pipで{packageName}をインストール/更新中なのだ...");
             var startInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
@@ -155,7 +155,7 @@ public class PythonPackageManager
         }
         catch (Exception ex)
         {
-            _logMessage($"{packageName}インストールでエラー: {ex.Message}");
+            _logMessage($"{packageName}インストールでエラーなのだ: {ex.Message}");
         }
     }
 
@@ -173,7 +173,7 @@ public class PythonPackageManager
             }
             else
             {
-                _logMessage($"markitdown {currentVersion} がインストール済み。最新バージョンを確認中...");
+                _logMessage($"markitdown {currentVersion} がインストール済みなのだ。最新バージョンを確認中なのだ...");
             }
 
             await InstallMarkItDownWithPipAsync();
@@ -186,12 +186,12 @@ public class PythonPackageManager
             }
             else
             {
-                _logMessage("markitdownのインストールに失敗しました");
+                _logMessage("markitdownのインストールに失敗したのだ");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"markitdown統一処理でエラー: {ex.Message}");
+            _logMessage($"markitdown統一処理でエラーなのだ: {ex.Message}");
         }
     }
 
@@ -250,7 +250,7 @@ public class PythonPackageManager
         try
         {
             // 1. extras 依存パッケージを先にインストール（markitdown[all] の依存群）
-            _logMessage("markitdownの依存パッケージをインストール中...");
+            _logMessage("markitdownの依存パッケージをインストール中なのだ...");
             await RunPipInstallAsync(
                 "--upgrade",
                 "magika>=0.6.1",
@@ -262,14 +262,14 @@ public class PythonPackageManager
 
             // 2. markitdown 本体を --upgrade --no-deps で最新版をインストール
             //    （onnxruntime<=1.20.1 制約を回避するため）
-            _logMessage("markitdown 最新版をインストール中...");
+            _logMessage("markitdown 最新版をインストール中なのだ...");
             await RunPipInstallAsync(
                 "--upgrade", "--no-deps",
                 "markitdown");
         }
         catch (Exception ex)
         {
-            _logMessage($"markitdownインストールでエラー: {ex.Message}");
+            _logMessage($"markitdownインストールでエラーなのだ: {ex.Message}");
         }
     }
 
@@ -317,6 +317,6 @@ public class PythonPackageManager
         }
 
         if (exitCode != 0)
-            _logMessage("pipインストールに失敗しました");
+            _logMessage("pipインストールに失敗したのだ");
     }
 }
