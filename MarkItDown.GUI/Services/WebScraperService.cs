@@ -126,8 +126,8 @@ public sealed class WebScraperService : IDisposable
             await _playwrightScraper.ScrapeWithBrowserAsync(url, outputPath, ct);
         }
 
-        // Ollama で JSON を整形する
-        await FormatJsonWithOllamaAsync(outputPath, ct);
+        // Ollama で JSON を整形・要約し、3ファイル出力する
+        await ProcessJsonWithOllamaAsync(outputPath, ct);
 
         _statusCallback?.Invoke("スクレイピング完了");
     }
@@ -197,39 +197,47 @@ public sealed class WebScraperService : IDisposable
     // ────────────────────────────────────────────
 
     /// <summary>
-    /// Ollama を使用してスクレイピング結果のJSONを整形する。
-    /// 情報を欠落させずに、整った構造のJSONに変換する。
-    /// 大きなJSONはチャンク分割して処理する。
+    /// スクレイピング結果のJSONを3種類のファイルに分けて出力する。
+    /// 元データ（生JSON）、整形済（Ollama整形JSON）、要約済（OllamaによるMarkdown要約）。
+    /// Ollamaが利用できない場合は元データのリネームのみ行う。
     /// </summary>
-    private async Task FormatJsonWithOllamaAsync(string jsonFilePath, CancellationToken ct)
+    private async Task ProcessJsonWithOllamaAsync(string jsonFilePath, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(_ollamaUrl) || string.IsNullOrEmpty(_ollamaModel))
-        {
-            _logMessage("Ollama が設定されていないため、JSON整形をスキップするのだ。");
-            return;
-        }
-
         if (!File.Exists(jsonFilePath))
         {
             return;
         }
 
+        var dir = Path.GetDirectoryName(jsonFilePath)!;
+        var nameWithoutExt = Path.GetFileNameWithoutExtension(jsonFilePath);
+        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+
+        // 1. 元データ: ファイルをリネーム
+        var originPath = Path.Combine(dir, $"{nameWithoutExt}_元データ_{timestamp}.json");
+        File.Move(jsonFilePath, originPath);
+        _logMessage($"元データ出力完了なのだ: {originPath}");
+
+        if (string.IsNullOrEmpty(_ollamaUrl) || string.IsNullOrEmpty(_ollamaModel))
+        {
+            _logMessage("Ollama が設定されていないため、整形・要約をスキップするのだ。");
+            return;
+        }
+
         try
         {
-            _statusCallback?.Invoke("Ollama でJSON整形中...");
-            _logMessage("Ollama でJSON整形を開始するのだ...");
-            var rawJson = await File.ReadAllTextAsync(jsonFilePath, System.Text.Encoding.UTF8, ct);
+            var rawJson = await File.ReadAllTextAsync(originPath, System.Text.Encoding.UTF8, ct);
 
             if (string.IsNullOrWhiteSpace(rawJson))
             {
-                _logMessage("JSONファイルが空のため、整形をスキップするのだ。");
+                _logMessage("JSONファイルが空のため、整形・要約をスキップするのだ。");
                 return;
             }
 
-            // JSONのサイズに応じて処理を分岐
-            // Ollamaのコンテキストウィンドウを考慮し、約30KB以下なら一括処理
-            const int chunkThreshold = 30_000;
+            // 2. 整形済: Ollama でJSON整形
+            _statusCallback?.Invoke("Ollama でJSON整形中...");
+            _logMessage("Ollama でJSON整形を開始するのだ...");
 
+            const int chunkThreshold = 30_000;
             string? formattedJson;
             if (rawJson.Length <= chunkThreshold)
             {
@@ -242,36 +250,52 @@ public sealed class WebScraperService : IDisposable
 
             if (!string.IsNullOrWhiteSpace(formattedJson))
             {
-                // 整形結果がJSON として有効かチェック
                 try
                 {
                     JsonSerializer.Deserialize<JsonElement>(formattedJson);
-                    await File.WriteAllTextAsync(jsonFilePath, formattedJson, System.Text.Encoding.UTF8, ct);
-                    _logMessage("Ollama によるJSON整形が完了したのだ！");
+                    var formatPath = Path.Combine(dir, $"{nameWithoutExt}_整形済_{timestamp}.json");
+                    await File.WriteAllTextAsync(formatPath, formattedJson, System.Text.Encoding.UTF8, ct);
+                    _logMessage($"整形済出力完了なのだ: {formatPath}");
                 }
                 catch (JsonException)
                 {
-                    _logMessage("Ollama の出力が有効なJSONではないため、元のJSONを保持するのだ。");
+                    _logMessage("Ollama の出力が有効なJSONではないため、整形済ファイルの出力をスキップするのだ。");
                 }
             }
             else
             {
-                _logMessage("Ollama からの応答が空のため、元のJSONを保持するのだ。");
+                _logMessage("Ollama からの応答が空のため、整形済ファイルの出力をスキップするのだ。");
+            }
+
+            // 3. 要約済: Ollama でMarkdown要約
+            _statusCallback?.Invoke("Ollama でJSON要約中...");
+            _logMessage("Ollama でJSON要約を開始するのだ...");
+
+            var summaryMd = await SummarizeJsonWithOllamaAsync(rawJson, ct);
+            if (!string.IsNullOrWhiteSpace(summaryMd))
+            {
+                var summaryPath = Path.Combine(dir, $"{nameWithoutExt}_要約済_{timestamp}.md");
+                await File.WriteAllTextAsync(summaryPath, summaryMd, System.Text.Encoding.UTF8, ct);
+                _logMessage($"要約済出力完了なのだ: {summaryPath}");
+            }
+            else
+            {
+                _logMessage("Ollama からの要約応答が空のため、要約済ファイルの出力をスキップするのだ。");
             }
         }
         catch (HttpRequestException ex)
         {
             _logError($"Ollama への接続に失敗したのだ: {ex.Message}");
-            _logMessage("元のJSONをそのまま保持するのだ。");
+            _logMessage("元データのみ保持するのだ。");
         }
         catch (TaskCanceledException)
         {
-            _logMessage("Ollama のJSON整形がタイムアウトしたのだ。元のJSONを保持するのだ。");
+            _logMessage("Ollama の処理がタイムアウトしたのだ。元データのみ保持するのだ。");
         }
         catch (Exception ex)
         {
-            _logError($"JSON整形中にエラーが発生したのだ: {ex.Message}");
-            _logMessage("元のJSONをそのまま保持するのだ。");
+            _logError($"JSON整形・要約中にエラーが発生したのだ: {ex.Message}");
+            _logMessage("元データのみ保持するのだ。");
         }
     }
 
@@ -566,6 +590,32 @@ public sealed class WebScraperService : IDisposable
     private static string BuildFormatUserPrompt(string rawJson)
     {
         return $"以下のJSONを整形してください。整形されたJSONのみを出力してください:\n\n{rawJson}";
+    }
+
+    /// <summary>
+    /// JSON要約用のシステムプロンプト
+    /// </summary>
+    private const string SummarySystemPrompt = """
+        あなたは文書要約の専門家です。
+        入力されたJSONデータの内容を簡潔にMarkdown形式で要約してください。
+
+        【要約のルール】
+        1. 元のテキストの言語をそのまま使用する（日本語→日本語、英語→英語）
+        2. JSONの構造ではなく、内容・意味を要約する
+        3. 主要なポイント・結論・重要な情報を抽出する
+        4. 箇条書きや見出しを使って読みやすくまとめる
+        5. 出力はMarkdown形式のみ（JSONではない）
+        6. 元のデータの10〜30%程度の分量にまとめる
+        7. 要約結果のMarkdownだけを出力する（説明文や前置きは不要）
+        """;
+
+    /// <summary>
+    /// Ollama を使用してJSONデータをMarkdown形式で要約する
+    /// </summary>
+    private async Task<string?> SummarizeJsonWithOllamaAsync(string rawJson, CancellationToken ct)
+    {
+        var userMessage = $"以下のJSONデータの内容をMarkdown形式で要約してください:\n\n{rawJson}";
+        return await CallOllamaChatAsync(SummarySystemPrompt, userMessage, ct);
     }
 
     // ────────────────────────────────────────────

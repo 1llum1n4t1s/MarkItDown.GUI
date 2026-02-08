@@ -592,6 +592,21 @@ def scrape_tweets(page, username: str) -> list[dict]:
             log("日付情報がないため、通常検索で再開するのだ...")
         page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
         time.sleep(random.uniform(4, 7))
+        # 検索結果が読み込まれるまでリトライ（最大5回）
+        for wait_try in range(5):
+            try:
+                tweet_els = page.query_selector_all('article[data-testid="tweet"]')
+                if tweet_els and len(tweet_els) > 0:
+                    log(f"再検索後、ツイート要素を{len(tweet_els)}件検出したのだ。")
+                    break
+            except Exception:
+                pass
+            if wait_try < 4:
+                log(f"再検索後のツイート読み込み待機中... ({wait_try + 1}/5)")
+                _handle_interruptions(page)
+                time.sleep(random.uniform(2, 4))
+                _human_scroll(page, random.uniform(500, 1000))
+                time.sleep(random.uniform(1, 2))
         scroll_count = 0
         no_new_count = 0
         return True
@@ -631,8 +646,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
 
         log(f"スクロール #{scroll_count}, 新規: {new_count}, 取得ツイート合計: {len(tweets)}")
 
-        # 新規0件が3回続いたら即座に迂回＋再検索
-        if no_new_count >= 3:
+        # 新規0件が5回続いたら迂回＋再検索
+        if no_new_count >= 5:
             log(f"連続{no_new_count}回新規ツイートなし。")
             if not _detour_and_resume():
                 break
