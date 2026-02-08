@@ -244,12 +244,6 @@ public sealed class PlaywrightScraperService
         var sessionPath = Path.Combine(appDir, "lib", "playwright", "x_session.json");
         startInfo.Environment["X_SESSION_PATH"] = sessionPath;
 
-        // Ollama 設定を環境変数で渡す（gemma3完了判定に使用）
-        if (!string.IsNullOrEmpty(_ollamaUrl))
-            startInfo.Environment["OLLAMA_URL"] = _ollamaUrl;
-        if (!string.IsNullOrEmpty(_ollamaModel))
-            startInfo.Environment["OLLAMA_MODEL"] = _ollamaModel;
-
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(username);
         startInfo.ArgumentList.Add(outputDir);
@@ -331,12 +325,6 @@ public sealed class PlaywrightScraperService
             }
             throw new InvalidOperationException(
                 "X.comのセッションが無効です。再度実行するとブラウザが開くので、ログインしてください。");
-        }
-
-        if (process.ExitCode == 4)
-        {
-            throw new InvalidOperationException(
-                "X.comスクレイピングにはOllamaの起動が必要です。Ollamaが起動していることを確認してください。");
         }
 
         if (process.ExitCode != 0)
@@ -519,20 +507,15 @@ public sealed class PlaywrightScraperService
             return;
         }
 
-        // gemma3 完了判定
-        if (logLine.Contains("gemma3 で状態を判定"))
+        // 迂回＋再検索
+        if (logLine.Contains("別ページを巡回して再検索"))
         {
-            _statusCallback($"@{username}: gemma3で完了状態を判定中...");
+            _statusCallback($"@{username}: BOT対策回避中...");
             return;
         }
-        if (logLine.Contains("gemma3 推論中"))
+        if (logLine.Contains("until:") && logLine.Contains("検索を再開"))
         {
-            _statusCallback($"@{username}: gemma3推論中...");
-            return;
-        }
-        if (logLine.Contains("gemma3判定:"))
-        {
-            _statusCallback($"@{username}: {logLine[(logLine.IndexOf("gemma3判定:"))..]}");
+            _statusCallback($"@{username}: 再検索中...");
             return;
         }
 

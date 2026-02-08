@@ -9,24 +9,19 @@ Usage:
 
 環境変数:
     X_SESSION_PATH: セッションファイルのパス
-    OLLAMA_URL: Ollama APIのURL（必須）
-    OLLAMA_MODEL: 使用するOllamaモデル名（必須）
 
 終了コード:
     0: 正常完了
     1: 致命的エラー
     2: playwright 未インストール
     3: セッション切れ（再ログインが必要）
-    4: Ollama 未設定
 """
 
-import base64
 import json
 import os
 import random
 import re
 import sys
-import threading
 import time
 import traceback
 from datetime import datetime, timezone
@@ -379,43 +374,13 @@ def _check_loading(page) -> bool:
         return False
 
 
-def _detect_error(page) -> str | None:
+def _handle_interruptions(page):
     """
-    ページ上のエラー表示を検出する。
-    Returns: エラーテキスト（検出時）または None
-    """
-    try:
-        error_el = page.query_selector(
-            'div[data-testid="error-detail"], '
-            'span:has-text("Something went wrong"), '
-            'span:has-text("問題が発生しました")'
-        )
-        if error_el and error_el.is_visible():
-            try:
-                return error_el.inner_text()[:100]
-            except Exception:
-                return "(エラーテキスト取得失敗)"
-    except Exception:
-        pass
-    return None
-
-
-def _handle_interruptions(page, consecutive_reloads: int = 0) -> int:
-    """
-    スクロール中に発生する各種ボタンやエラー表示を検出して対処する。
+    スクロール中に発生する各種ボタンを検出して対処する。
     - 「再試行」ボタン
     - 「もっと見る」ボタン
-    - 「Something went wrong」エラー
-    - レート制限エラー
-
-    Args:
-        consecutive_reloads: 連続リロード回数
-
-    Returns:
-        更新された連続リロード回数（リロード以外のアクション時は0にリセット）
+    エラー表示は検出しない（新規0件で即座に迂回＋再検索するため）。
     """
-    MAX_CONSECUTIVE_RELOADS = 3
-
     try:
         # 「再試行 / Retry」ボタン
         retry_button = page.query_selector(
@@ -427,8 +392,8 @@ def _handle_interruptions(page, consecutive_reloads: int = 0) -> int:
         if retry_button and retry_button.is_visible():
             retry_button.click()
             log("再試行ボタンを押したのだ")
-            time.sleep(5)
-            return 0  # リトライボタンは別アクションなのでリセット
+            time.sleep(3)
+            return
 
         # 「もっと見る / Show more」的なボタン
         show_more = page.query_selector(
@@ -440,150 +405,18 @@ def _handle_interruptions(page, consecutive_reloads: int = 0) -> int:
             show_more.click()
             log("もっと見るボタンを押したのだ")
             time.sleep(3)
-            return 0
-
-        # 「Something went wrong」エラー → ページをリロード
-        error_text = _detect_error(page)
-        if error_text:
-            log(f"エラー要素を検出: '{error_text}'")
-
-            if consecutive_reloads >= MAX_CONSECUTIVE_RELOADS:
-                log(f"連続リロード{consecutive_reloads}回に達した。リロードをスキップするのだ。")
-                return consecutive_reloads
-
-            log(f"エラー表示を検出。ページをリロードするのだ...（連続リロード: {consecutive_reloads + 1}/{MAX_CONSECUTIVE_RELOADS}）")
-            scroll_y = page.evaluate("window.scrollY")
-            page.reload(wait_until="domcontentloaded")
-            time.sleep(5)
-            page.evaluate(f"window.scrollTo(0, {scroll_y})")
-            time.sleep(2)
-            return consecutive_reloads + 1
+            return
 
     except Exception:
         pass
 
-    return consecutive_reloads
 
-
-def _judge_completion_with_ollama(page, ollama_url: str, ollama_model: str) -> str:
-    """
-    gemma3 にスクリーンショットを送り、スクロール完了状態を判定させる。
-
-    Returns:
-        "A": まだツイートが読み込まれる可能性がある
-        "B": 検索結果の末端に到達した
-        "C": エラーが表示されている
-        "D": レート制限されている
-        "X": 判定不能（Ollamaエラー等）
-    """
-    try:
-        from openai import OpenAI
-    except ImportError:
-        log("openai パッケージが利用できないため、gemma3判定をスキップするのだ")
-        return "X"
-
-    # スクリーンショット撮影
-    try:
-        screenshot_bytes = page.screenshot(
-            full_page=False,
-            type="jpeg",
-            quality=50,
-            scale="css",
-        )
-        screenshot_b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-        log(f"完了判定用スクリーンショット取得 ({len(screenshot_bytes)} bytes)")
-    except Exception as e:
-        log(f"スクリーンショット取得エラー: {e}")
-        return "X"
-
-    # Ollama クライアント作成（gemma3マルチモーダル推論は時間がかかるため長めのタイムアウト）
-    client = OpenAI(
-        base_url=f"{ollama_url}/v1",
-        api_key="ollama",
-        timeout=300,
-        max_retries=0,
-    )
-
-    prompt = (
-        "このX.com（Twitter）の検索結果画面のスクリーンショットを見て、現在の状態を判断してください。\n"
-        "以下の選択肢から最も適切なものを1つ選んでください。\n\n"
-        "A: まだツイートが読み込まれる可能性がある（スクロール可能、ツイートが表示されている）\n"
-        "B: 検索結果の末端に到達した（すべて表示済み、これ以上ツイートはない、または「検索結果はありません」表示）\n"
-        "C: エラーが表示されている（Something went wrong、問題が発生しました 等）\n"
-        "D: レート制限またはアクセス制限されている\n\n"
-        "A/B/C/D のいずれか1文字のみで回答してください。"
-    )
-
-    messages = [
-        {
-            "role": "system",
-            "content": "あなたはWebページの状態を分析する専門家です。与えられたスクリーンショットを見て、指示された形式で回答してください。",
-        },
-        {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{screenshot_b64}"
-                    },
-                },
-            ],
-        },
-    ]
-
-    # ハートビートスレッド（C#側のアイドルタイムアウト回避）
-    stop_heartbeat = threading.Event()
-
-    def heartbeat():
-        elapsed = 0
-        while not stop_heartbeat.wait(30):
-            elapsed += 30
-            log(f"gemma3 推論中... ({elapsed}秒経過)")
-
-    hb_thread = threading.Thread(target=heartbeat, daemon=True)
-    hb_thread.start()
-
-    try:
-        log("gemma3 にスクロール完了状態を問い合わせ中...")
-        response = client.chat.completions.create(
-            model=ollama_model,
-            messages=messages,
-            temperature=0.1,
-        )
-    except Exception as e:
-        error_msg = str(e)
-        if "timed out" in error_msg.lower() or "timeout" in error_msg.lower():
-            log(f"gemma3 問い合わせタイムアウト（300秒）: {e}")
-        else:
-            log(f"gemma3 問い合わせエラー: {e}")
-        return "X"
-    finally:
-        stop_heartbeat.set()
-
-    # レスポンスから A/B/C/D を抽出
-    try:
-        answer = response.choices[0].message.content.strip()
-        log(f"gemma3 回答: '{answer}'")
-        # 最初に見つかる A/B/C/D を抽出
-        match = re.search(r'[ABCD]', answer.upper())
-        if match:
-            result = match.group(0)
-            log(f"gemma3 判定結果: {result}")
-            return result
-        else:
-            log(f"gemma3 回答から判定文字を抽出できなかったのだ: '{answer}'")
-            return "X"
-    except Exception as e:
-        log(f"gemma3 回答解析エラー: {e}")
-        return "X"
-
-
-def scrape_tweets(page, username: str, ollama_url: str, ollama_model: str) -> list[dict]:
+def scrape_tweets(page, username: str) -> list[dict]:
     """
     Phase 1: from:username 検索で全ツイートを取得する。
     無限スクロールで最古まで到達。
+    新規ツイートが取得できなくなったら即座に別ページを巡回し、
+    until: 付き検索で再開することでBOT対策を回避する。
     """
     tweets = {}  # tweet_id → tweet_data
     base_search_query = f"from:{username} -filter:retweets"
@@ -645,22 +478,24 @@ def scrape_tweets(page, username: str, ollama_url: str, ollama_model: str) -> li
 
     scroll_count = 0
     no_new_count = 0
-    max_no_new = 15  # 連続15回新規なしで完了判定に入る
     last_save_count = 0
-    consecutive_reloads = 0  # _handle_interruptions の連続リロード回数
-    ollama_retry_count = 0   # gemma3判定でリセットした回数（無限ループ防止）
-    max_ollama_retries = 3   # gemma3判定によるリセットは最大3回まで
-    cooldown_count = 0       # クールダウン回数（BOT対策エラー用）
-    max_cooldowns = 3        # クールダウン上限
+    renavigate_count = 0     # 迂回＋再検索した回数
+    max_renavigate = 5       # 連続で新規0のまま迂回した上限（＝本当の末端）
+    prev_total = 0           # 前回の迂回時の合計件数（進捗チェック用）
 
-    def _cooldown_and_renavigate():
-        """BOT対策エラー時のクールダウン＋別ページ巡回後にuntil:付き検索で再開"""
-        nonlocal cooldown_count, consecutive_reloads, search_url, scroll_count
-        cooldown_count += 1
-        if cooldown_count > max_cooldowns:
-            log(f"クールダウン上限({max_cooldowns}回)に到達。これ以上の回復は困難なのだ。")
+    def _detour_and_resume():
+        """別ページを巡回し、until: 付き検索で再開する。"""
+        nonlocal renavigate_count, search_url, scroll_count, no_new_count, prev_total
+        renavigate_count += 1
+        if renavigate_count > max_renavigate:
+            log(f"迂回上限({max_renavigate}回)に到達。完了とするのだ。")
             return False
-        log(f"BOT対策の可能性あり。別ページを巡回してクールダウンするのだ（{cooldown_count}/{max_cooldowns}）")
+        # 前回迂回時から1件も増えていなければ本当の末端
+        if renavigate_count > 1 and len(tweets) == prev_total:
+            log("前回の迂回から新規ツイートが増えていないのだ。末端に到達したと判断するのだ。")
+            return False
+        prev_total = len(tweets)
+        log(f"新規ツイートなし。別ページを巡回して再検索するのだ（{renavigate_count}/{max_renavigate}）")
         # 複数の別ページを順番に巡回（人間的な行動を模倣）
         detour_pages = [
             "https://x.com/home",
@@ -679,16 +514,15 @@ def scrape_tweets(page, username: str, ollama_url: str, ollama_model: str) -> li
                 log(f"  迂回ページ遷移エラー（無視して続行）: {e}")
         # until: 付き検索URLで再開（既取得分のスクロールが不要になる）
         until_date = _get_oldest_tweet_date()
-        new_search_url = _build_search_url(until_date)
+        search_url = _build_search_url(until_date)
         if until_date:
             log(f"until:{until_date} 付きで検索を再開するのだ...")
         else:
             log("日付情報がないため、通常検索で再開するのだ...")
-        search_url = new_search_url
         page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
         time.sleep(random.uniform(4, 7))
-        consecutive_reloads = 0
-        scroll_count = 0  # 新しい検索なのでスクロールカウントもリセット
+        scroll_count = 0
+        no_new_count = 0
         return True
 
     while True:
@@ -720,81 +554,18 @@ def scrape_tweets(page, username: str, ollama_url: str, ollama_model: str) -> li
 
         if new_count > 0:
             no_new_count = 0
-            consecutive_reloads = 0  # 新規ツイート取得時はリロードカウンターもリセット
-            cooldown_count = 0       # 正常取得できたらクールダウンもリセット
+            renavigate_count = 0  # 正常取得できたら迂回カウントもリセット
         else:
             no_new_count += 1
 
         log(f"スクロール #{scroll_count}, 新規: {new_count}, 取得ツイート合計: {len(tweets)}")
 
-        # エラー検出 → 即座にクールダウン判断（gemma3を待たずに）
+        # 新規0件が3回続いたら即座に迂回＋再検索
         if no_new_count >= 3:
-            error_text = _detect_error(page)
-            if error_text:
-                log(f"エラー検出: '{error_text}'")
-                # まずリロードを試行
-                consecutive_reloads = _handle_interruptions(page, consecutive_reloads)
-                if consecutive_reloads >= 3:
-                    # リロードでも解決しない → クールダウン＋再遷移
-                    if not _cooldown_and_renavigate():
-                        break
-                    no_new_count = 0
-                continue
-
-        # 連続で新規ツイートなし → gemma3で完了判定
-        if no_new_count >= max_no_new:
-            # まずローディングスピナーチェック
-            is_loading = _check_loading(page)
-            if is_loading and no_new_count < max_no_new * 2:
-                log("読み込み中のため、もう少し待つのだ...")
-                time.sleep(5)
-                continue
-
-            # gemma3 による完了判定
-            if ollama_retry_count >= max_ollama_retries:
-                log(f"gemma3判定リセット上限({max_ollama_retries}回)に達したのだ。完了とするのだ。")
+            log(f"連続{no_new_count}回新規ツイートなし。")
+            if not _detour_and_resume():
                 break
-
-            log(f"連続{no_new_count}回新規ツイートなし。gemma3 で状態を判定するのだ...")
-            judgment = _judge_completion_with_ollama(page, ollama_url, ollama_model)
-
-            if judgment == "B":
-                log("gemma3判定: 検索結果の末端に到達したのだ。全ツイート取得完了！")
-                break
-            elif judgment == "C":
-                # エラー → クールダウン＋再遷移
-                log("gemma3判定: エラー表示を検出。")
-                ollama_retry_count += 1
-                if not _cooldown_and_renavigate():
-                    break
-                no_new_count = 0
-                continue
-            elif judgment == "D":
-                # レート制限 → 長めクールダウン
-                log("gemma3判定: レート制限を検出。")
-                ollama_retry_count += 1
-                if not _cooldown_and_renavigate():
-                    break
-                no_new_count = 0
-                continue
-            elif judgment == "A":
-                log("gemma3判定: まだツイートが読み込まれる可能性があるのだ。続行するのだ。")
-                ollama_retry_count += 1
-                page.evaluate("window.scrollBy(0, window.innerHeight * 3)")
-                time.sleep(random.uniform(3, 6))
-                no_new_count = 0
-                continue
-            else:
-                # 判定不能（タイムアウト等）
-                ollama_retry_count += 1
-                if ollama_retry_count >= max_ollama_retries:
-                    log("gemma3判定: 判定不能が続いたため、完了とするのだ。")
-                    break
-                log(f"gemma3判定: 判定不能のためスクロールして再試行するのだ（{ollama_retry_count}/{max_ollama_retries}）")
-                page.evaluate("window.scrollBy(0, window.innerHeight * 3)")
-                time.sleep(random.uniform(3, 6))
-                no_new_count = 0
-                continue
+            continue
 
         # 100件ごとに中間ログ
         if len(tweets) - last_save_count >= 100:
@@ -806,15 +577,10 @@ def scrape_tweets(page, username: str, ollama_url: str, ollama_model: str) -> li
         page.evaluate(f"window.scrollBy(0, window.innerHeight * {scroll_amount})")
 
         # 人間的なランダム待機時間
-        if no_new_count >= 3:
-            wait_time = min(3 + no_new_count, 10)  # 3〜10秒
-            if no_new_count % 5 == 0:
-                log(f"新規ツイートなし連続{no_new_count}回。{wait_time}秒待機するのだ...")
-            time.sleep(wait_time)
-            consecutive_reloads = _handle_interruptions(page, consecutive_reloads)
-        else:
-            # 新規ツイート取得中は短めだがランダムな待機
-            time.sleep(random.uniform(1.0, 2.0))
+        time.sleep(random.uniform(1.0, 2.0))
+
+        # ボタン対処（再試行/もっと見る等）
+        _handle_interruptions(page)
 
     return list(tweets.values())
 
@@ -996,14 +762,6 @@ def main():
         log("playwright パッケージがインストールされていないのだ")
         sys.exit(2)
 
-    # Ollama 設定チェック（必須）
-    ollama_url = os.environ.get("OLLAMA_URL", "")
-    ollama_model = os.environ.get("OLLAMA_MODEL", "")
-    if not ollama_url or not ollama_model:
-        log("OLLAMA_URL/OLLAMA_MODEL が設定されていないのだ。X.comスクレイピングにはOllamaが必要なのだ。")
-        sys.exit(4)
-    log(f"Ollama設定: URL={ollama_url}, Model={ollama_model}")
-
     # 出力ディレクトリ準備（C#側で username サブフォルダは作成済み）
     user_output_dir = output_dir
     os.makedirs(user_output_dir, exist_ok=True)
@@ -1022,7 +780,7 @@ def main():
 
             # Phase 1: 全ツイート取得
             log("=== Phase 1: ツイート取得 ===")
-            tweets = scrape_tweets(page, username, ollama_url, ollama_model)
+            tweets = scrape_tweets(page, username)
             log(f"ツイート取得完了: {len(tweets)} 件")
 
             if len(tweets) == 0:

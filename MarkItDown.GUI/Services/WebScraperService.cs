@@ -103,13 +103,6 @@ public sealed class WebScraperService : IDisposable
                 throw new InvalidOperationException("Playwright スクレイパーが初期化されていません。");
             }
 
-            // Ollama必須チェック（gemma3による完了判定に使用）
-            if (string.IsNullOrEmpty(_ollamaUrl) || string.IsNullOrEmpty(_ollamaModel))
-            {
-                throw new InvalidOperationException(
-                    "X.comスクレイピングにはOllamaの起動が必要です。設定画面でOllamaが有効になっていることを確認してください。");
-            }
-
             var username = ExtractXTwitterUsername(url);
             var outputDir = Path.GetDirectoryName(outputPath)!;
             _statusCallback?.Invoke($"X.com (@{username}) のスクレイピング中...");
