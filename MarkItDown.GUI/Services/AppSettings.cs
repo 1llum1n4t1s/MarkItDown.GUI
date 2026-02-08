@@ -10,7 +10,7 @@ namespace MarkItDown.GUI.Services;
 public class AppSettings
 {
     private static readonly string SettingsPath = Path.Combine(
-        AppDomain.CurrentDomain.BaseDirectory,
+        AppPathHelper.SettingsDirectory,
         "appsettings.xml");
 
     private static XDocument? _settingsDocument;

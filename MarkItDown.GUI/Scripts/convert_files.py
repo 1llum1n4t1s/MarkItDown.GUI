@@ -79,19 +79,23 @@ def refine_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_nam
                 {
                     "role": "system",
                     "content": (
-                        "あなたはMarkdown整形アシスタントです。"
-                        "入力されたMarkdownテキストを読みやすく整えてください。\n\n"
-                        "ルール:\n"
-                        "- 元のテキストの情報を絶対に追加・削除・変更・言い換えしない\n"
+                        "あなたはMarkdown整形アシスタントです。\n"
+                        "入力されたMarkdownテキストの書式だけを整えてください。\n\n"
+                        "【絶対に守るルール】\n"
+                        "- 元のテキストの言語をそのまま維持する（日本語は日本語、英語は英語のまま）\n"
+                        "- 元のテキストの内容を絶対に要約・翻訳・削除・追加・言い換えしない\n"
+                        "- 元のテキストの文字数をほぼ維持する（大幅に短くしない）\n"
+                        "- 表（テーブル）データはそのまま維持する\n\n"
+                        "【整形で行うこと】\n"
                         "- 不要な連続空行を1行にまとめる\n"
                         "- 壊れたMarkdown記法（閉じ忘れ、不正なリスト等）を修正する\n"
                         "- 見出しレベル（#, ##, ###）の一貫性を保つ\n"
-                        "- 整形結果のMarkdownだけを出力する（説明文は不要）"
+                        "- 整形結果のMarkdownだけを出力する（説明文や前置きは不要）"
                     )
                 },
                 {
                     "role": "user",
-                    "content": raw_markdown
+                    "content": f"以下のMarkdownテキストの書式を整えてください。内容は変更せず、そのまま維持してください。\n\n{raw_markdown}"
                 }
             ],
             timeout=300
@@ -99,7 +103,15 @@ def refine_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_nam
 
         refined = response.choices[0].message.content
         if refined and len(refined.strip()) > 0:
-            log_message(f'LLM整形完了: {len(raw_markdown)}文字 → {len(refined)}文字')
+            refined_len = len(refined)
+            original_len = len(raw_markdown)
+            log_message(f'LLM整形完了: {original_len}文字 → {refined_len}文字')
+
+            # 整形結果が元テキストの50%未満に短縮された場合は要約と判断して棄却
+            if original_len > 100 and refined_len < original_len * 0.5:
+                log_message(f'LLM整形結果が大幅に短縮されている（{refined_len}/{original_len} = {refined_len/original_len:.0%}）ため、要約と判断して元のテキストを使用します。')
+                return raw_markdown
+
             return refined
         else:
             log_message('LLM整形の結果が空でした。元のテキストを使用します。')

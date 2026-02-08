@@ -20,6 +20,7 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from urllib.parse import urljoin, urlparse
@@ -155,37 +156,28 @@ def _is_multimodal_model(model_name: str) -> bool:
     return any(m in name for m in MULTIMODAL_MODELS)
 
 def capture_page_screenshot(page, ollama_model: str) -> str | None:
-    """マルチモーダルモデル用にスクリーンショットを取得し、base64 で返す"""
+    """マルチモーダルモデル用にスクリーンショットを取得し、JPEG圧縮+リサイズしてbase64で返す"""
     if not _is_multimodal_model(ollama_model):
         return None
 
     try:
-        screenshot_bytes = page.screenshot(full_page=False)  # ビューポートのみ
-        b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
+        # JPEG品質50で撮影し、データサイズを大幅に削減
+        screenshot_bytes = page.screenshot(
+            full_page=False,
+            type="jpeg",
+            quality=50,
+            scale="css",          # デバイスピクセル比を無視して CSS ピクセルで撮影
+        )
         log(f"スクリーンショット取得完了 ({len(screenshot_bytes)} bytes)")
+        b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
         return b64
     except Exception as e:
         log(f"スクリーンショット取得エラー: {e}")
         return None
 
 
-def generate_scraping_strategy(
-    page_summary: dict,
-    screenshot_b64: str | None,
-    ollama_url: str,
-    ollama_model: str
-) -> dict:
-    """
-    Ollama にページ構造を分析させ、スクレイピング戦略 JSON を返す。
-    失敗時は例外を投げる。
-    """
-    if OpenAI is None:
-        raise ImportError("openai パッケージがインストールされていません")
-
-    client = OpenAI(base_url=f"{ollama_url}/v1", api_key="ollama")
-
-    prompt = build_strategy_prompt(page_summary)
-
+def _build_messages(prompt: str, screenshot_b64: str | None, ollama_model: str) -> list:
+    """Ollama に送るメッセージリストを構築する"""
     messages = [
         {
             "role": "system",
@@ -210,27 +202,92 @@ def generate_scraping_strategy(
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/png;base64,{screenshot_b64}"
+                        "url": f"data:image/jpeg;base64,{screenshot_b64}"
                     },
                 },
             ],
         }
 
-    log("Ollama にスクレイピング戦略を問い合わせ中...")
-    response = client.chat.completions.create(
-        model=ollama_model,
-        messages=messages,
-        temperature=0.1,
-        timeout=120,
+    return messages
+
+
+def generate_scraping_strategy(
+    page_summary: dict,
+    screenshot_b64: str | None,
+    ollama_url: str,
+    ollama_model: str
+) -> dict:
+    """
+    Ollama にページ構造を分析させ、スクレイピング戦略 JSON を返す。
+    画像付きで失敗した場合はテキストのみでフォールバックする。
+    """
+    if OpenAI is None:
+        raise ImportError("openai パッケージがインストールされていません")
+
+    client = OpenAI(
+        base_url=f"{ollama_url}/v1",
+        api_key="ollama",
+        timeout=300,        # CPU推論向けに十分な時間を確保
+        max_retries=0,      # 自動リトライは無効（手動フォールバックで制御）
     )
+
+    prompt = build_strategy_prompt(page_summary)
+
+    # 試行1: スクリーンショット付き（マルチモーダルモデルの場合）
+    if screenshot_b64 and _is_multimodal_model(ollama_model):
+        messages = _build_messages(prompt, screenshot_b64, ollama_model)
+        log("Ollama にスクレイピング戦略を問い合わせ中（スクリーンショット付き）...")
+        try:
+            result = _call_ollama(client, ollama_model, messages)
+            if result is not None:
+                return result
+        except Exception as e:
+            log(f"スクリーンショット付き問い合わせに失敗: {e}")
+
+        # 試行2: テキストのみでフォールバック
+        log("テキストのみで再問い合わせ中...")
+
+    messages = _build_messages(prompt, None, ollama_model)
+    if not (screenshot_b64 and _is_multimodal_model(ollama_model)):
+        log("Ollama にスクレイピング戦略を問い合わせ中...")
+
+    result = _call_ollama(client, ollama_model, messages)
+    if result is not None:
+        return result
+
+    raise ValueError("Ollama から有効なスクレイピング戦略を取得できませんでした")
+
+
+def _call_ollama(client, ollama_model: str, messages: list) -> dict | None:
+    """Ollama API を呼び出し、戦略 JSON を返す。失敗時は None を返す。"""
+    # 推論中にハートビートを出力してC#側のアイドルタイムアウトを回避
+    stop_heartbeat = threading.Event()
+
+    def heartbeat():
+        elapsed = 0
+        while not stop_heartbeat.wait(30):
+            elapsed += 30
+            log(f"Ollama 推論中... ({elapsed}秒経過)")
+
+    hb_thread = threading.Thread(target=heartbeat, daemon=True)
+    hb_thread.start()
+    try:
+        response = client.chat.completions.create(
+            model=ollama_model,
+            messages=messages,
+            temperature=0.1,
+        )
+    finally:
+        stop_heartbeat.set()
+        hb_thread.join(timeout=1)
 
     response_text = response.choices[0].message.content or ""
     log(f"Ollama 応答長: {len(response_text)} 文字")
 
-    # JSON を抽出
     strategy_json = extract_json_from_text(response_text)
     if not strategy_json:
-        raise ValueError(f"Ollama の応答から有効な JSON を抽出できませんでした: {response_text[:200]}")
+        log(f"Ollama の応答から有効な JSON を抽出できませんでした: {response_text[:200]}")
+        return None
 
     strategy = json.loads(strategy_json)
     log(f"戦略生成完了: page_type={strategy.get('page_type', 'unknown')}")
@@ -710,7 +767,70 @@ LOAD_MORE_SELECTORS = [
 ]
 
 
-def click_load_more_buttons(page, max_clicks: int = 50, wait_ms: int = 2000):
+def _try_click(el, page, wait_ms: int) -> bool:
+    """
+    要素のクリックを試みる。
+    オーバーレイ等にポインターイベントを遮られた場合は force=True でリトライする。
+    """
+    try:
+        el.scroll_into_view_if_needed()
+        el.click(timeout=3000)
+        page.wait_for_timeout(wait_ms)
+        return True
+    except Exception as click_err:
+        err_msg = str(click_err)
+        if "intercepts pointer events" in err_msg or "Timeout" in err_msg:
+            # オーバーレイに遮られているため、まず除去を試みてからリトライ
+            _dismiss_overlays(page)
+            try:
+                el.click(timeout=3000)
+                page.wait_for_timeout(wait_ms)
+                return True
+            except Exception:
+                # それでも失敗する場合は force クリック
+                try:
+                    el.click(force=True, timeout=3000)
+                    page.wait_for_timeout(wait_ms)
+                    return True
+                except Exception as force_err:
+                    log(f"force クリックも失敗: {force_err}")
+                    return False
+        raise
+
+
+def _dismiss_overlays(page):
+    """ページ上のオーバーレイ（モーダル、ログイン促進等）を除去する"""
+    try:
+        page.evaluate("""() => {
+            // #layers 直下の子要素を除去（X/Twitter のオーバーレイ構造）
+            const layers = document.querySelector('#layers');
+            if (layers) {
+                while (layers.firstChild) {
+                    layers.removeChild(layers.firstChild);
+                }
+            }
+            // 一般的なモーダル / オーバーレイを除去
+            const selectors = [
+                '[class*="overlay"]', '[class*="modal"]', '[class*="popup"]',
+                '[class*="dialog"]', '[role="dialog"]',
+            ];
+            for (const sel of selectors) {
+                document.querySelectorAll(sel).forEach(el => {
+                    // body 直下やメインコンテンツを誤って消さないよう、
+                    // position が fixed/absolute のもののみ対象
+                    const style = window.getComputedStyle(el);
+                    if (style.position === 'fixed' || style.position === 'absolute') {
+                        el.remove();
+                    }
+                });
+            }
+        }""")
+        log("オーバーレイを除去しました")
+    except Exception as e:
+        log(f"オーバーレイ除去中にエラー: {e}")
+
+
+def click_load_more_buttons(page, max_clicks: int = 10, wait_ms: int = 2000):
     """
     ページ上の「もっと見る」系ボタンを繰り返しクリックして
     動的コンテンツを全て読み込む。
@@ -731,13 +851,11 @@ def click_load_more_buttons(page, max_clicks: int = 50, wait_ms: int = 2000):
                         text = (el.inner_text() or "").strip()
                         if text and re.search(pattern, text, re.IGNORECASE):
                             if el.is_visible() and el.is_enabled():
-                                el.scroll_into_view_if_needed()
-                                el.click()
-                                page.wait_for_timeout(wait_ms)
-                                total_clicks += 1
-                                clicked = True
-                                log(f"ボタンクリック: '{text}' (#{total_clicks})")
-                                break
+                                if _try_click(el, page, wait_ms):
+                                    total_clicks += 1
+                                    clicked = True
+                                    log(f"ボタンクリック: '{text}' (#{total_clicks})")
+                                    break
                     except Exception as e:
                         log(f"ボタンクリック処理中にエラー: {e}")
                         continue
@@ -755,14 +873,12 @@ def click_load_more_buttons(page, max_clicks: int = 50, wait_ms: int = 2000):
                     if el and el.is_visible():
                         try:
                             if el.is_enabled():
-                                el.scroll_into_view_if_needed()
-                                el.click()
-                                page.wait_for_timeout(wait_ms)
-                                total_clicks += 1
-                                clicked = True
-                                text = (el.inner_text() or "").strip()[:30]
-                                log(f"セレクタクリック: '{text}' ({selector}) (#{total_clicks})")
-                                break
+                                if _try_click(el, page, wait_ms):
+                                    total_clicks += 1
+                                    clicked = True
+                                    text = (el.inner_text() or "").strip()[:30]
+                                    log(f"セレクタクリック: '{text}' ({selector}) (#{total_clicks})")
+                                    break
                         except Exception as e:
                             log(f"セレクタクリック処理中にエラー: {e}")
                             continue
@@ -850,6 +966,9 @@ def main():
     if not check_playwright_browsers():
         install_playwright_browsers()
 
+    # C#側タイムアウト(300秒)より余裕を持たせた制限（秒）
+    SCRAPE_TIME_LIMIT = 240
+
     log("ブラウザを起動中...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -866,9 +985,17 @@ def main():
             current_url = url
             page_num = 0
             max_pages = 100  # 安全上限
-            strategy = None  # 1ページ目で生成し、以降は再利用
+            strategy = None
+            scrape_start = time.monotonic()
+
+            def remaining_time() -> float:
+                return SCRAPE_TIME_LIMIT - (time.monotonic() - scrape_start)
 
             while current_url and page_num < max_pages:
+                if remaining_time() <= 30:
+                    log(f"残り時間が少ないため処理を終了します（残り {remaining_time():.0f}秒）")
+                    break
+
                 # 正規化して重複チェック
                 normalized = current_url.split("?")[0].split("#")[0].rstrip("/")
                 if normalized in visited_urls:
@@ -889,14 +1016,10 @@ def main():
                 # Cookie バナーを閉じる（初回のみ）
                 if page_num == 1:
                     dismiss_cookie_banners(page)
+                    _dismiss_overlays(page)
 
-                # 動的コンテンツを読み込む
-                clicks = click_load_more_buttons(page)
-                if clicks > 0:
-                    log(f"動的コンテンツ読み込み (クリック数: {clicks})")
-
-                # 1ページ目でのみ Ollama に戦略を問い合わせ
-                if page_num == 1:
+                # Ollama に戦略を問い合わせ（初回）
+                if strategy is None:
                     log("ページ構造を分析中...")
                     page_summary = get_page_summary(page, current_url)
                     screenshot_b64 = capture_page_screenshot(page, ollama_model)
@@ -904,15 +1027,61 @@ def main():
                         page_summary, screenshot_b64, ollama_url, ollama_model
                     )
 
-                # 戦略ベースでデータ抽出
-                page_data = extract_with_strategy(page, current_url, strategy)
-                page_data["page_number"] = page_num
-                all_pages.append(page_data)
+                # 動的コンテンツの段階的読み込み + 抽出ループ
+                round_num = 0
+                prev_content_count = 0
+                while remaining_time() > 30:
+                    round_num += 1
+                    log(f"ラウンド {round_num}（残り {remaining_time():.0f}秒）")
 
-                content_count = len(page_data.get("content", []))
-                log(f"抽出コンテンツ数: {content_count}")
+                    # 10回クリックして動的コンテンツを読み込む
+                    clicks = click_load_more_buttons(page)
+                    if clicks > 0:
+                        log(f"動的コンテンツ読み込み (クリック数: {clicks})")
 
-                # 戦略ベースのページネーション
+                    # 戦略ベースでデータ抽出
+                    try:
+                        page_data = extract_with_strategy(page, current_url, strategy)
+                    except RuntimeError:
+                        if round_num == 1:
+                            raise
+                        log("追加コンテンツの抽出に失敗、このページの処理を終了します")
+                        break
+
+                    current_content_count = len(page_data.get("content", []))
+                    log(f"抽出コンテンツ数: {current_content_count}")
+
+                    # 初回ラウンドまたはコンテンツが増えた場合のみ結果を更新
+                    if round_num == 1:
+                        page_data["page_number"] = page_num
+                        all_pages.append(page_data)
+                    elif current_content_count > prev_content_count:
+                        page_data["page_number"] = page_num
+                        all_pages[-1] = page_data  # 最新の抽出結果で上書き
+                    else:
+                        log("新しいコンテンツが見つからないため、このページの読み込みを完了します")
+                        break
+
+                    prev_content_count = current_content_count
+
+                    # クリックが0回（ボタンもスクロールも効果なし）なら終了
+                    if clicks == 0:
+                        log("クリック可能な要素がないため、このページの読み込みを完了します")
+                        break
+
+                    # 次のラウンド前に Ollama に戦略を再問い合わせ
+                    if remaining_time() > 60:
+                        log("ページ構造を再分析中...")
+                        page_summary = get_page_summary(page, current_url)
+                        screenshot_b64 = capture_page_screenshot(page, ollama_model)
+                        try:
+                            strategy = generate_scraping_strategy(
+                                page_summary, screenshot_b64, ollama_url, ollama_model
+                            )
+                        except Exception as strat_err:
+                            log(f"戦略再生成に失敗、前回の戦略を継続します: {strat_err}")
+
+                # ページネーション
                 next_url = find_next_page_with_strategy(page, current_url, strategy)
                 if next_url and next_url != current_url:
                     log(f"次のページを検出: {next_url}")
@@ -922,6 +1091,9 @@ def main():
                     current_url = None
 
             # 結果を構築
+            elapsed = time.monotonic() - scrape_start
+            log(f"スクレイピング完了（経過時間: {elapsed:.0f}秒）")
+
             if len(all_pages) == 1:
                 result = all_pages[0]
                 result["scraped_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())

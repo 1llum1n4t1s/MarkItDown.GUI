@@ -95,6 +95,31 @@ public sealed class WebScraperService : IDisposable
             await File.WriteAllTextAsync(outputPath, json, System.Text.Encoding.UTF8, ct);
             _logMessage($"JSONファイルを出力したのだ: {outputPath}");
         }
+        else if (siteType == SiteType.XTwitter)
+        {
+            // X/Twitter はPlaywright専用スクリプトで処理
+            if (_playwrightScraper is null)
+            {
+                throw new InvalidOperationException("Playwright スクレイパーが初期化されていません。");
+            }
+
+            // Ollama必須チェック（gemma3による完了判定に使用）
+            if (string.IsNullOrEmpty(_ollamaUrl) || string.IsNullOrEmpty(_ollamaModel))
+            {
+                throw new InvalidOperationException(
+                    "X.comスクレイピングにはOllamaの起動が必要です。設定画面でOllamaが有効になっていることを確認してください。");
+            }
+
+            var username = ExtractXTwitterUsername(url);
+            var outputDir = Path.GetDirectoryName(outputPath)!;
+            _statusCallback?.Invoke($"X.com (@{username}) のスクレイピング中...");
+            _logMessage($"X.com 専用スクレイピングを開始するのだ: @{username}");
+            await _playwrightScraper.ScrapeXTwitterAsync(username, outputDir, ct);
+
+            // X.comはデータが膨大になるためOllama整形をスキップ
+            _statusCallback?.Invoke("スクレイピング完了");
+            return;
+        }
         else
         {
             if (_playwrightScraper is null)
@@ -554,7 +579,7 @@ public sealed class WebScraperService : IDisposable
     //  サイト種別判定
     // ────────────────────────────────────────────
 
-    private enum SiteType { Reddit, Generic }
+    private enum SiteType { Reddit, XTwitter, Generic }
 
     private static SiteType DetectSiteType(string url)
     {
@@ -563,6 +588,8 @@ public sealed class WebScraperService : IDisposable
             var host = uri.Host.ToLowerInvariant();
             if (IsRedditHost(host))
                 return SiteType.Reddit;
+            if (IsXTwitterHost(host) && IsXTwitterUserUrl(uri))
+                return SiteType.XTwitter;
         }
         return SiteType.Generic;
     }
@@ -573,6 +600,63 @@ public sealed class WebScraperService : IDisposable
             or "old.reddit.com" or "new.reddit.com"
             or "np.reddit.com" or "m.reddit.com"
             || host.EndsWith(".reddit.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsXTwitterHost(string host)
+    {
+        return host is "x.com" or "www.x.com"
+            or "twitter.com" or "www.twitter.com"
+            or "mobile.twitter.com" or "mobile.x.com";
+    }
+
+    /// <summary>
+    /// X/TwitterのユーザーページURLかどうかを判定する。
+    /// /username 形式であり、/home, /search, /settings, /i/, /explore 等の
+    /// システムパスではないことを確認する。
+    /// </summary>
+    private static bool IsXTwitterUserUrl(Uri uri)
+    {
+        var path = uri.AbsolutePath.Trim('/');
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        // システムパスを除外
+        var excludedPaths = new[]
+        {
+            "home", "search", "explore", "notifications", "messages",
+            "settings", "i", "compose", "intent", "tos", "privacy",
+            "login", "signup", "logout", "about", "help"
+        };
+
+        // パスの最初のセグメントを取得
+        var firstSegment = path.Split('/')[0].ToLowerInvariant();
+
+        foreach (var excluded in excludedPaths)
+        {
+            if (firstSegment == excluded)
+                return false;
+        }
+
+        // ユーザー名は英数字とアンダースコアのみ（1〜15文字）
+        return Regex.IsMatch(firstSegment, @"^[A-Za-z0-9_]{1,15}$");
+    }
+
+    /// <summary>
+    /// X/TwitterのURLからユーザー名を抽出する
+    /// </summary>
+    public static string ExtractXTwitterUsername(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            throw new ArgumentException($"無効なURL: {url}");
+
+        var path = uri.AbsolutePath.Trim('/');
+        var username = path.Split('/')[0];
+
+        // クエリパラメータ等を除去
+        if (username.Contains('?'))
+            username = username.Split('?')[0];
+
+        return username;
     }
 
     // ────────────────────────────────────────────

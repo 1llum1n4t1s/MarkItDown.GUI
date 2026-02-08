@@ -23,7 +23,7 @@
     <PackageReference Include="Avalonia" Version="11.3.11" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
-    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.36" />
+    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.38" />
     <PackageReference Include="7z.Libs" Version="25.1.0" />
     <PackageReference Include="Velopack" Version="0.0.*" />
     <PackageReference Include="ZLogger" Version="2.5.10" />
@@ -39,10 +39,7 @@
   <!-- ビルド前にアイコンを生成 -->
   <Target Name="GenerateIcon" BeforeTargets="BeforeBuild">
     <Message Text="アイコン生成スクリプトを実行中..." Importance="high" />
-    <Exec Command="pwsh -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\icon\generate_icon.ps1&quot;" 
-          ContinueOnError="true"
-          IgnoreExitCode="false"
-          WorkingDirectory="$(MSBuildProjectDirectory)\..\icon" />
+    <Exec Command="pwsh -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\icon\generate_icon.ps1&quot;" ContinueOnError="true" IgnoreExitCode="false" WorkingDirectory="$(MSBuildProjectDirectory)\..\icon" />
   </Target>
 
   <!-- 7z.dll を SingleFile バンドルに含めず exe の横に外部ファイルとして残す。
@@ -51,8 +48,7 @@
        ファイルシステム上にファイルが必要。 -->
   <Target Name="Exclude7zDllFromSingleFile" AfterTargets="ComputeResolvedFilesToPublishList">
     <ItemGroup>
-      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)"
-                             Condition="'%(Filename)' == '7z' AND '%(Extension)' == '.dll'">
+      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)" Condition="'%(Filename)' == '7z' AND '%(Extension)' == '.dll'">
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </ResolvedFileToPublish>
     </ItemGroup>

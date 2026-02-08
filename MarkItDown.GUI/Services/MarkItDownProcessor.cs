@@ -58,8 +58,6 @@ public class MarkItDownProcessor
             {
                 File.WriteAllText(scriptPath, checkScript, Encoding.UTF8);
                 _logMessage("チェックスクリプト作成完了なのだ");
-                _logMessage($"スクリプトパス: {scriptPath}");
-                _logMessage($"スクリプト内容:\n{checkScript}");
                     
                 var startInfo = new ProcessStartInfo
                 {

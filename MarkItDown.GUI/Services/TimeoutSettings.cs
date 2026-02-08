@@ -57,4 +57,10 @@ public static class TimeoutSettings
     /// ブラウザバイナリのダウンロードを含むため長めに設定
     /// </summary>
     public const int PlaywrightInstallTimeoutMs = 300000;
+
+    /// <summary>
+    /// Idle timeout for X/Twitter scraping (10 minutes)
+    /// 全ツイート取得＋画像ダウンロードで長時間かかるため、汎用より長めに設定
+    /// </summary>
+    public const int XTwitterIdleTimeoutMs = 600000;
 }

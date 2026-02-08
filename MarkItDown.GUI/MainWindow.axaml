@@ -61,7 +61,8 @@
         </Border>
 
         <!-- ログ表示エリア -->
-        <ScrollViewer Grid.Row="2"
+        <ScrollViewer x:Name="LogScrollViewer"
+                      Grid.Row="2"
                       VerticalScrollBarVisibility="Auto"
                       HorizontalScrollBarVisibility="Auto"
                       Margin="5">

@@ -101,9 +101,9 @@ public partial class PythonEnvironmentManager
         await _pythonDetectionSemaphore.WaitAsync();
         try
         {
-            var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            _logMessage($"アプリケーションディレクトリなのだ: {appDirectory}");
-            var managedEmbeddedPath = Path.Combine(appDirectory, "lib", "python", "python-embed");
+            var libDirectory = AppPathHelper.LibDirectory;
+            _logMessage($"ライブラリディレクトリなのだ: {libDirectory}");
+            var managedEmbeddedPath = Path.Combine(libDirectory, "python", "python-embed");
             _logMessage($"管理対象Pythonパスなのだ: {managedEmbeddedPath}");
 
             var targetVersion = await GetTargetEmbeddedPythonVersionAsync();
@@ -121,7 +121,7 @@ public partial class PythonEnvironmentManager
             }
 
             _logMessage("管理対象Pythonは利用できないのだ。別の場所を検索するのだ...");
-            var libPythonDir = Path.Combine(appDirectory, "lib", "python");
+            var libPythonDir = Path.Combine(libDirectory, "python");
             if (Directory.Exists(libPythonDir))
             {
                 var pythonDirs = Directory.GetDirectories(libPythonDir, "python*embed*");
@@ -137,7 +137,7 @@ public partial class PythonEnvironmentManager
                 }
             }
 
-            var directEmbeddedPath = Path.Combine(appDirectory, "python-embed");
+            var directEmbeddedPath = Path.Combine(AppPathHelper.LibDirectory, "python-embed");
             var directExe = Path.Combine(directEmbeddedPath, "python.exe");
             if (File.Exists(directExe))
             {
@@ -278,8 +278,7 @@ public partial class PythonEnvironmentManager
     /// </summary>
     private async Task<bool> DownloadEmbeddedPythonAsync()
     {
-        var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-        var basePythonDir = Path.Combine(appDirectory, "lib", "python");
+        var basePythonDir = Path.Combine(AppPathHelper.LibDirectory, "python");
         var embeddedPythonPath = Path.Combine(basePythonDir, "python-embed");
         var embeddedPythonBackupPath = embeddedPythonPath + ".backup";
 

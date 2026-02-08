@@ -20,7 +20,8 @@ public sealed class LoggerOptions
 {
     public string AppName { get; set; } = "MarkItDown.GUI";
     public string? LogDirectoryOverride { get; set; }
-    public int RollingSizeMb { get; set; } = 10;
+    public int RollingSizeKb { get; set; } = 1024;
+    public int RollingMaxFiles { get; set; } = 1;
 }
 
 public static class Logger
@@ -87,8 +88,8 @@ public static class Logger
             {
                 options.FilePathSelector = (timestamp, sequenceNumber) =>
                     Path.Combine(logDirectory, $"{_appName}_{timestamp.ToLocalTime():yyyyMMdd}_{sequenceNumber:000}.log");
-                options.RollingSizeKB = opt.RollingSizeMb * 1024;
-                
+                options.RollingSizeKB = opt.RollingSizeKb;
+
                 // プレーンテキストフォーマッタを設定（ここでタイムスタンプ等の形式を決める）
                 options.UsePlainTextFormatter(formatter =>
                 {
@@ -107,6 +108,8 @@ public static class Logger
 
         _logger = _loggerFactory.CreateLogger(_appName);
         _logger.LogInformation($"Logger initialized - Log directory: {logDirectory}");
+
+        CleanupOldLogFiles(logDirectory, opt.RollingMaxFiles);
     }
 
     public static void Log(string message, LogLevel level = LogLevel.Info)
@@ -162,6 +165,36 @@ public static class Logger
         _loggerFactory?.Dispose();
         _loggerFactory = null;
         _logger = null;
+    }
+
+    /// <summary>
+    /// 古いログファイルを削除し、最新の maxFiles 件のみ残す
+    /// </summary>
+    private static void CleanupOldLogFiles(string logDirectory, int maxFiles)
+    {
+        try
+        {
+            var logFiles = Directory.GetFiles(logDirectory, $"{_appName}_*.log")
+                .OrderByDescending(f => f)
+                .Skip(maxFiles)
+                .ToArray();
+
+            foreach (var file in logFiles)
+            {
+                try
+                {
+                    File.Delete(file);
+                }
+                catch
+                {
+                    // 使用中のファイルは削除できない場合がある
+                }
+            }
+        }
+        catch
+        {
+            // ログクリーンアップ失敗は無視
+        }
     }
 
     // 自前EnumをMS標準Enumに変換するヘルパー

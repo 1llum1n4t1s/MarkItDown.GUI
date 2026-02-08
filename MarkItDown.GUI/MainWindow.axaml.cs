@@ -1,8 +1,10 @@
+using System.ComponentModel;
 using System.Linq;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
+using Avalonia.Threading;
 using MarkItDown.GUI.ViewModels;
 
 namespace MarkItDown.GUI;
@@ -21,6 +23,11 @@ public partial class MainWindow : Avalonia.Controls.Window
         DataContext = new MainWindowViewModel();
         InitializeDropZone();
         Closed += MainWindow_Closed;
+        ViewModel.PropertyChanged += ViewModel_PropertyChanged;
+
+        // ウィンドウ表示後にURL入力欄にフォーカスを設定
+        Opened += (_, _) =>
+            Dispatcher.UIThread.Post(() => UrlInputTextBox.Focus(), DispatcherPriority.Background);
     }
 
     /// <summary>
@@ -35,7 +42,22 @@ public partial class MainWindow : Avalonia.Controls.Window
     /// <param name="e">イベント引数</param>
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
         ViewModel.Dispose();
+    }
+
+    /// <summary>
+    /// ViewModel のプロパティ変更時にログを自動スクロールする
+    /// </summary>
+    /// <param name="sender">イベントソース</param>
+    /// <param name="e">プロパティ変更イベント引数</param>
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainWindowViewModel.LogText))
+        {
+            // レイアウト更新後にスクロールを実行する（Background 優先度で次のフレームで実行）
+            Dispatcher.UIThread.Post(() => LogScrollViewer.ScrollToEnd(), DispatcherPriority.Background);
+        }
     }
 
     /// <summary>

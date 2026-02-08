@@ -12,7 +12,7 @@ namespace MarkItDown.GUI.ViewModels;
 /// </summary>
 public class MainWindowViewModel : ViewModelBase, IDisposable
 {
-    private string _logText = "アプリケーションが起動したのだ...";
+    private string _logText = "アプリケーションが起動したのだ...\n";
     private IBrush _dropZoneBackground;
     private FileProcessor? _fileProcessor;
     private OllamaManager? _ollamaManager;
@@ -395,9 +395,47 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         ShowProcessing("URL抽出中...", "Webページをスクレイピングしています...");
         try
         {
-            // ファイル名をURLから生成（安全な名前に変換）
-            var fileName = WebScraperService.GenerateSafeFileName(url);
-            var outputPath = System.IO.Path.Combine(outputDirectory, fileName);
+            // X.com ユーザーページの場合はサブフォルダを作成
+            string outputPath;
+            var normalizedUrl = url;
+            if (!normalizedUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !normalizedUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                normalizedUrl = "https://" + normalizedUrl;
+            }
+
+            if (Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var uri))
+            {
+                var host = uri.Host.ToLowerInvariant();
+                if ((host is "x.com" or "www.x.com" or "twitter.com" or "www.twitter.com"
+                     or "mobile.twitter.com" or "mobile.x.com"))
+                {
+                    var username = WebScraperService.ExtractXTwitterUsername(normalizedUrl);
+                    // 重複フォルダ回避: 同名フォルダが既に存在する場合は _1, _2, ... を付与
+                    var baseDirName = username;
+                    var userDir = System.IO.Path.Combine(outputDirectory, baseDirName);
+                    var suffix = 1;
+                    while (System.IO.Directory.Exists(userDir))
+                    {
+                        baseDirName = $"{username}_{suffix}";
+                        userDir = System.IO.Path.Combine(outputDirectory, baseDirName);
+                        suffix++;
+                    }
+                    System.IO.Directory.CreateDirectory(userDir);
+                    outputPath = System.IO.Path.Combine(userDir, $"{username}.json");
+                    LogMessage($"X.com ユーザーフォルダを作成したのだ: {userDir}");
+                }
+                else
+                {
+                    var fileName = WebScraperService.GenerateSafeFileName(url);
+                    outputPath = System.IO.Path.Combine(outputDirectory, fileName);
+                }
+            }
+            else
+            {
+                var fileName = WebScraperService.GenerateSafeFileName(url);
+                outputPath = System.IO.Path.Combine(outputDirectory, fileName);
+            }
 
             await _webScraperService.ScrapeAsync(url, outputPath);
             LogMessage($"抽出完了なのだ: {outputPath}");

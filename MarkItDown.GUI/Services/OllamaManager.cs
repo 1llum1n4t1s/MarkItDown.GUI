@@ -92,8 +92,7 @@ public class OllamaManager : IDisposable
             _logMessage($"Ollama URLなのだ: {_ollamaUrl}");
             _logMessage($"Ollama モデルなのだ: {DefaultModelName}");
 
-            var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            var ollamaBaseDir = Path.Combine(appDirectory, "lib", "ollama");
+            var ollamaBaseDir = Path.Combine(AppPathHelper.LibDirectory, "ollama");
             _logMessage($"Ollamaディレクトリなのだ: {ollamaBaseDir}");
 
             if (Directory.Exists(ollamaBaseDir))
@@ -751,62 +750,31 @@ public class OllamaManager : IDisposable
 
         try
         {
-            if (_ollamaProcess != null && !_ollamaProcess.HasExited)
+            // アプリ終了時にOllamaプロセスを確実に終了する
+            if (_ollamaProcess != null)
             {
                 try
                 {
-                    _logMessage("Ollamaサーバーを停止中なのだ...");
+                    if (!_ollamaProcess.HasExited)
+                    {
+                        _ollamaProcess.Kill(true);
+                        _ollamaProcess.WaitForExit(5000);
+                    }
                 }
                 catch
                 {
-                    // ログ出力が失敗しても続行
+                    // プロセス終了時のエラーは無視
                 }
-                
-                try
+
+                if (disposing)
                 {
-                    _ollamaProcess.Kill(true);
-                    if (!_ollamaProcess.WaitForExit(5000))
-                    {
-                        try
-                        {
-                            _logMessage("Ollamaプロセスの終了を待機中にタイムアウトしたのだ。");
-                        }
-                        catch
-                        {
-                            // ログ出力が失敗しても続行
-                        }
-                    }
-                    else
-                    {
-                        try
-                        {
-                            _logMessage("Ollamaサーバーの停止が完了したのだ。");
-                        }
-                        catch
-                        {
-                            // ログ出力が失敗しても続行
-                        }
-                    }
-                }
-                catch (InvalidOperationException)
-                {
-                    // プロセスが既に終了している場合
-                }
-                catch
-                {
-                    // その他のエラーも無視して続行
-                }
-                finally
-                {
-                    if (disposing)
-                    {
-                        _ollamaProcess.Dispose();
-                    }
+                    _ollamaProcess.Dispose();
                 }
             }
-            
+
+            // 孤立したOllamaプロセスも終了する
             KillOrphanedOllamaProcesses();
-            
+
             if (disposing)
             {
                 _httpClient?.Dispose();

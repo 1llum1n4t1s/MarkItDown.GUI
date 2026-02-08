@@ -63,8 +63,7 @@ public partial class FfmpegManager
         try
         {
             _logMessage("ffmpeg環境の初期化を開始するのだ。");
-            var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
-            var ffmpegBaseDir = Path.Combine(appDirectory, "lib", "ffmpeg");
+            var ffmpegBaseDir = Path.Combine(AppPathHelper.LibDirectory, "ffmpeg");
             _logMessage($"ffmpeg ディレクトリなのだ: {ffmpegBaseDir}");
 
             if (Directory.Exists(ffmpegBaseDir))
