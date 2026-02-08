@@ -591,7 +591,7 @@ def should_ignore(element, ignore_selectors: list) -> bool:
     for selector in ignore_selectors:
         try:
             parent = element.evaluate(
-                f"(el) => el.closest('{selector}') !== null"
+                "(el, sel) => el.closest(sel) !== null", selector
             )
             if parent:
                 return True
@@ -879,7 +879,11 @@ def main():
 
                 log(f"--- ページ {page_num} ---")
                 log(f"アクセス中: {current_url}")
-                page.goto(current_url, wait_until="networkidle", timeout=60000)
+                try:
+                    page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
+                except Exception as nav_error:
+                    log(f"ナビゲーション警告: {nav_error}")
+                    log("ページの読み込みを続行します...")
                 log(f"読み込み完了: {page.title()}")
 
                 # Cookie バナーを閉じる（初回のみ）

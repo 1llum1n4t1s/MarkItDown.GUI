@@ -12,6 +12,7 @@ public class MarkItDownProcessor
 {
     private readonly string _pythonExecutablePath;
     private readonly Action<string> _logMessage;
+    private readonly Action<string> _logError;
     private readonly string? _ffmpegBinPath;
     private readonly string? _ollamaUrl;
     private readonly string? _ollamaModel;
@@ -24,10 +25,12 @@ public class MarkItDownProcessor
     /// <param name="ffmpegBinPath">Path to ffmpeg bin directory (optional)</param>
     /// <param name="ollamaUrl">Ollama endpoint URL (optional)</param>
     /// <param name="ollamaModel">Ollama model name (optional)</param>
-    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null, string? ollamaUrl = null, string? ollamaModel = null)
+    /// <param name="logError">Error log delegate (optional, defaults to logMessage)</param>
+    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null, string? ollamaUrl = null, string? ollamaModel = null, Action<string>? logError = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
+        _logError = logError ?? logMessage;
         _ffmpegBinPath = ffmpegBinPath;
         _ollamaUrl = ollamaUrl;
         _ollamaModel = ollamaModel;
@@ -111,7 +114,7 @@ public class MarkItDownProcessor
                     }
                     if (!string.IsNullOrEmpty(error))
                     {
-                        _logMessage($"Pythonエラー:\n{error}");
+                        _logError($"Pythonエラー:\n{error}");
                     }
 
                     if (process.ExitCode == 0)
@@ -121,13 +124,13 @@ public class MarkItDownProcessor
                     }
                     else
                     {
-                        _logMessage($"MarkItDownライブラリチェック失敗なのだ - 終了コード: {process.ExitCode}");
+                        _logError($"MarkItDownライブラリチェック失敗なのだ - 終了コード: {process.ExitCode}");
                         return false;
                     }
                 }
                 else
                 {
-                    _logMessage("Pythonプロセスの開始に失敗したのだ");
+                    _logError("Pythonプロセスの開始に失敗したのだ");
                     _logMessage($"Python実行パス: {_pythonExecutablePath}");
                     _logMessage($"スクリプトパス: {scriptPath}");
                     _logMessage($"スクリプトファイル存在: {File.Exists(scriptPath)}");
@@ -145,14 +148,14 @@ public class MarkItDownProcessor
                     }
                     catch (Exception ex)
                     {
-                        _logMessage($"一時ファイル削除に失敗したのだ: {ex.Message}");
+                        _logError($"一時ファイル削除に失敗したのだ: {ex.Message}");
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"MarkItDownライブラリチェック中にエラーなのだ: {ex.Message}");
+            _logError($"MarkItDownライブラリチェック中にエラーなのだ: {ex.Message}");
             return false;
         }
     }
@@ -254,12 +257,12 @@ public class MarkItDownProcessor
             }
             else
             {
-                _logMessage("Pythonプロセスの開始に失敗したのだ");
+                _logError("Pythonプロセスの開始に失敗したのだ");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"Pythonスクリプト実行中にエラーなのだ: {ex.Message}");
+            _logError($"Pythonスクリプト実行中にエラーなのだ: {ex.Message}");
             _logMessage($"スタックトレースなのだ: {ex.StackTrace}");
         }
     }

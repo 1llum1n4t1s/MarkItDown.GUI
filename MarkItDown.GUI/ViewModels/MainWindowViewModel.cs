@@ -115,7 +115,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             if (task.IsFaulted)
             {
                 var ex = task.Exception?.GetBaseException();
-                LogMessage($"初期化エラーなのだ: {ex?.Message}");
+                LogMessage($"初期化エラーなのだ: {ex?.Message}", LogLevel.Error);
             }
         }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
     }
@@ -129,21 +129,21 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             ShowProcessing("MarkItDown.GUI を初期化中...", "Python環境を初期化中...");
 
-            var pythonEnvironmentManager = new PythonEnvironmentManager(LogMessage, UpdatePythonDownloadProgress);
+            var pythonEnvironmentManager = new PythonEnvironmentManager(LogMessage, UpdatePythonDownloadProgress, logError: LogError, logWarning: LogWarning);
             await pythonEnvironmentManager.InitializeAsync();
 
             if (!pythonEnvironmentManager.IsPythonAvailable)
             {
-                LogMessage("Python環境の初期化に失敗したのだ。");
+                LogMessage("Python環境の初期化に失敗したのだ。", LogLevel.Error);
                 return;
             }
 
             UpdateProcessingStatus("ffmpeg環境を準備中...");
-            var ffmpegManager = new FfmpegManager(LogMessage, UpdateFfmpegDownloadProgress);
+            var ffmpegManager = new FfmpegManager(LogMessage, UpdateFfmpegDownloadProgress, logError: LogError, logWarning: LogWarning);
             await ffmpegManager.InitializeAsync();
 
             UpdateProcessingStatus("Ollama環境を確認中...");
-            _ollamaManager = new OllamaManager(LogMessage, UpdateOllamaDownloadProgress);
+            _ollamaManager = new OllamaManager(LogMessage, UpdateOllamaDownloadProgress, UpdateOllamaStatus, logError: LogError, logWarning: LogWarning);
             await _ollamaManager.InitializeAsync();
 
             var pythonExe = pythonEnvironmentManager.PythonExecutablePath;
@@ -152,15 +152,15 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             var ollamaModel = _ollamaManager.IsOllamaAvailable ? _ollamaManager.DefaultModel : null;
 
             UpdateProcessingStatus("Pythonパッケージを確認中...");
-            var pythonPackageManager = new PythonPackageManager(pythonExe, LogMessage);
+            var pythonPackageManager = new PythonPackageManager(pythonExe, LogMessage, logError: LogError, logWarning: LogWarning);
             await pythonPackageManager.InstallMarkItDownPackageAsync();
 
             UpdateProcessingStatus("MarkItDownライブラリを準備中...");
-            var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, ollamaUrl, ollamaModel);
-            _fileProcessor = new FileProcessor(markItDownProcessor, LogMessage);
+            var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, ollamaUrl, ollamaModel, logError: LogError);
+            _fileProcessor = new FileProcessor(markItDownProcessor, LogMessage, logError: LogError);
 
-            _webScraperService = new WebScraperService(LogMessage, UpdateProcessingStatus);
-            var playwrightScraper = new PlaywrightScraperService(pythonExe, LogMessage, UpdateProcessingStatus);
+            _webScraperService = new WebScraperService(LogMessage, UpdateProcessingStatus, logError: LogError);
+            var playwrightScraper = new PlaywrightScraperService(pythonExe, LogMessage, UpdateProcessingStatus, logError: LogError);
 
             // Ollama が利用可能な場合、Playwright/WebScraper に設定を渡す
             if (_ollamaManager is { IsOllamaAvailable: true })
@@ -176,7 +176,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (Exception ex)
         {
-            LogMessage($"初期化中にエラーが発生したのだ: {ex.Message}");
+            LogMessage($"初期化中にエラーが発生したのだ: {ex.Message}", LogLevel.Error);
             Logger.LogException("初期化中にエラーが発生しました", ex);
         }
         finally
@@ -190,11 +190,26 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     /// ログメッセージを画面に追加する（バッチ処理版）
     /// </summary>
     /// <param name="message">表示するメッセージ</param>
-    public void LogMessage(string message)
+    public void LogMessage(string message) => LogMessage(message, LogLevel.Info);
+
+    /// <summary>
+    /// エラーレベルでログメッセージを画面に追加する
+    /// </summary>
+    public void LogError(string message) => LogMessage(message, LogLevel.Error);
+
+    /// <summary>
+    /// 警告レベルでログメッセージを画面に追加する
+    /// </summary>
+    public void LogWarning(string message) => LogMessage(message, LogLevel.Warning);
+
+    /// <summary>
+    /// ログメッセージを指定レベルで画面に追加する
+    /// </summary>
+    public void LogMessage(string message, LogLevel level)
     {
         try
         {
-            Logger.Log(message, LogLevel.Info);
+            Logger.Log(message, level);
 
             lock (_logBatchLock)
             {
@@ -352,16 +367,16 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         }
         catch (HttpRequestException ex)
         {
-            LogMessage($"HTTP通信エラーなのだ: {ex.Message}");
+            LogMessage($"HTTP通信エラーなのだ: {ex.Message}", LogLevel.Error);
             Logger.LogException("URL抽出中にHTTPエラーが発生しました", ex);
         }
         catch (ArgumentException ex)
         {
-            LogMessage($"URL解析エラーなのだ: {ex.Message}");
+            LogMessage($"URL解析エラーなのだ: {ex.Message}", LogLevel.Error);
         }
         catch (Exception ex)
         {
-            LogMessage($"URL抽出中にエラーが発生したのだ: {ex.Message}");
+            LogMessage($"URL抽出中にエラーが発生したのだ: {ex.Message}", LogLevel.Error);
             Logger.LogException("URL抽出中にエラーが発生しました", ex);
         }
         finally
@@ -443,11 +458,8 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         });
     }
 
-    private bool _isOllamaExtracting;
-    private bool _ollamaDownloadCompleted;
-
     /// <summary>
-    /// Ollamaダウンロード進捗を更新する
+    /// Ollamaダウンロード進捗を更新する（プログレスバーのみ担当）
     /// </summary>
     /// <param name="progress">進捗率（0～100）</param>
     private void UpdateOllamaDownloadProgress(double progress)
@@ -456,36 +468,18 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             DownloadProgress = progress;
             IsDownloading = progress > 0 && progress < 100;
-            
-            if (progress >= 100 && !_ollamaDownloadCompleted)
-            {
-                _ollamaDownloadCompleted = true;
-                _isOllamaExtracting = true;
-            }
-            
-            if (_isOllamaExtracting)
-            {
-                if (progress == 0)
-                {
-                    UpdateProcessingStatus("Ollamaアーカイブを展開準備中...");
-                }
-                else if (progress > 0 && progress < 100)
-                {
-                    UpdateProcessingStatus($"Ollamaファイルを展開中... {progress:F0}%");
-                }
-                else if (progress >= 100)
-                {
-                    UpdateProcessingStatus("Ollama展開完了");
-                    _isOllamaExtracting = false;
-                }
-            }
-            else
-            {
-                if (progress > 0 && progress < 100)
-                {
-                    UpdateProcessingStatus("Ollamaダウンロード中...");
-                }
-            }
+        });
+    }
+
+    /// <summary>
+    /// Ollamaステータスメッセージを更新する（オーバーレイのステータス文字列を担当）
+    /// </summary>
+    /// <param name="status">ステータスメッセージ</param>
+    private void UpdateOllamaStatus(string status)
+    {
+        Dispatcher.UIThread.Post(() =>
+        {
+            ProcessingStatus = status;
         });
     }
 
@@ -534,7 +528,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 try
                 {
-                    LogMessage($"リソース解放中にエラーなのだ: {ex.Message}");
+                    LogMessage($"リソース解放中にエラーなのだ: {ex.Message}", LogLevel.Error);
                 }
                 catch
                 {

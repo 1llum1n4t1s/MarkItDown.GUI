@@ -15,15 +15,17 @@ public sealed class PlaywrightScraperService
 {
     private readonly string _pythonExecutablePath;
     private readonly Action<string> _logMessage;
+    private readonly Action<string> _logError;
     private readonly Action<string>? _statusCallback;
     private bool _dependenciesInstalled;
     private string? _ollamaUrl;
     private string? _ollamaModel;
 
-    public PlaywrightScraperService(string pythonExecutablePath, Action<string> logMessage, Action<string>? statusCallback = null)
+    public PlaywrightScraperService(string pythonExecutablePath, Action<string> logMessage, Action<string>? statusCallback = null, Action<string>? logError = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
+        _logError = logError ?? logMessage;
         _statusCallback = statusCallback;
     }
 
@@ -220,11 +222,11 @@ public sealed class PlaywrightScraperService
         if (!string.IsNullOrEmpty(output))
             _logMessage($"pip: {output.TrimEnd()}");
         if (!string.IsNullOrEmpty(error) && exitCode != 0)
-            _logMessage($"pip エラー: {error.TrimEnd()}");
+            _logError($"pip エラー: {error.TrimEnd()}");
 
         if (exitCode == 0)
             _logMessage($"{packageName} のインストール/更新完了なのだ");
         else
-            _logMessage($"{packageName} のインストール/更新に失敗したのだ");
+            _logError($"{packageName} のインストール/更新に失敗したのだ");
     }
 }

@@ -7,3 +7,4 @@
 bin/
 obj/
 %temp%/
+MarkItDown.GUI/binBuildCheck/

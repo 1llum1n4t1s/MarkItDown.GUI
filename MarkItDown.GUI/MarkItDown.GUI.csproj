@@ -6,7 +6,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
-    <Version>1.0.12</Version>
+    <Version>1.0.14</Version>
     <Authors>ゆろち</Authors>
     <Title>MarkItDown.GUI</Title>
     <ApplicationIcon>..\icon\app.ico</ApplicationIcon>
@@ -45,8 +45,8 @@
           WorkingDirectory="$(MSBuildProjectDirectory)\..\icon" />
   </Target>
 
-  <!-- ビルド後に7z.dllをルートに配置 -->
-  <Target Name="MoveNativeDllsToRoot" AfterTargets="Build">
+  <!-- ビルド/パブリッシュ後に7z.dllをルートに配置 -->
+  <Target Name="MoveNativeDllsToRoot" AfterTargets="Build;Publish">
     <!-- 7z.dllを複数の場所から確認して移動 -->
     <Move SourceFiles="$(OutputPath)x64\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)x64\7z.dll')" ContinueOnError="true" />
     <Move SourceFiles="$(OutputPath)runtimes\win-x64\native\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)runtimes\win-x64\native\7z.dll')" ContinueOnError="true" />

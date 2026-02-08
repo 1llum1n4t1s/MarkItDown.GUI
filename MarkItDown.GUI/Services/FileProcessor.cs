@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -14,7 +15,8 @@ public class FileProcessor
 {
     private readonly MarkItDownProcessor _markItDownProcessor;
     private readonly Action<string> _logMessage;
-    private readonly Dictionary<string, (long ticks, DateTime timestamp)> _fileCache = new();
+    private readonly Action<string> _logError;
+    private readonly ConcurrentDictionary<string, (long ticks, DateTime timestamp)> _fileCache = new(StringComparer.OrdinalIgnoreCase);
 
     private enum PathType
     {
@@ -28,10 +30,11 @@ public class FileProcessor
     /// </summary>
     /// <param name="markItDownProcessor">MarkItDown processor class</param>
     /// <param name="logMessage">Log output function</param>
-    public FileProcessor(MarkItDownProcessor markItDownProcessor, Action<string> logMessage)
+    public FileProcessor(MarkItDownProcessor markItDownProcessor, Action<string> logMessage, Action<string>? logError = null)
     {
         _markItDownProcessor = markItDownProcessor;
         _logMessage = logMessage;
+        _logError = logError ?? logMessage;
     }
 
     /// <summary>
@@ -181,7 +184,7 @@ public class FileProcessor
         }
         catch (Exception ex)
         {
-            _logMessage($"MarkItDown変換中にエラーが発生したのだ: {ex.Message}");
+            _logError($"MarkItDown変換中にエラーが発生したのだ: {ex.Message}");
             _logMessage($"スタックトレースなのだ: {ex.StackTrace}");
         }
     }
@@ -230,7 +233,7 @@ public class FileProcessor
         }
         catch (Exception ex)
         {
-            _logMessage($"ファイル処理エラーなのだ ({filePath}): {ex.Message}");
+            _logError($"ファイル処理エラーなのだ ({filePath}): {ex.Message}");
         }
         finally
         {
@@ -276,7 +279,7 @@ public class FileProcessor
         }
         catch (Exception ex)
         {
-            _logMessage($"フォルダ処理エラーなのだ ({folderPath}): {ex.Message}");
+            _logError($"フォルダ処理エラーなのだ ({folderPath}): {ex.Message}");
         }
         finally
         {
@@ -302,7 +305,7 @@ public class FileProcessor
         }
         catch (Exception ex)
         {
-            _logMessage($"一時ファイル削除に失敗したのだ: {ex.Message}");
+            _logError($"一時ファイル削除に失敗したのだ: {ex.Message}");
         }
     }
 

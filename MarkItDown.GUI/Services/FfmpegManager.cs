@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Cube.FileSystem.SevenZip;
@@ -15,6 +16,8 @@ namespace MarkItDown.GUI.Services;
 public partial class FfmpegManager
 {
     private readonly Action<string> _logMessage;
+    private readonly Action<string> _logError;
+    private readonly Action<string> _logWarning;
     private readonly Action<double>? _progressCallback;
     private readonly SemaphoreSlim _ffmpegDetectionSemaphore = new(1, 1);
     private string _ffmpegPath = string.Empty;
@@ -31,9 +34,13 @@ public partial class FfmpegManager
     /// </summary>
     /// <param name="logMessage">ログ出力用デリゲート</param>
     /// <param name="progressCallback">進捗コールバック関数（オプション）</param>
-    public FfmpegManager(Action<string> logMessage, Action<double>? progressCallback = null)
+    /// <param name="logError">エラーログ用デリゲート（省略時は logMessage を使用）</param>
+    /// <param name="logWarning">警告ログ用デリゲート（省略時は logMessage を使用）</param>
+    public FfmpegManager(Action<string> logMessage, Action<double>? progressCallback = null, Action<string>? logError = null, Action<string>? logWarning = null)
     {
         _logMessage = logMessage;
+        _logError = logError ?? logMessage;
+        _logWarning = logWarning ?? logMessage;
         _progressCallback = progressCallback;
     }
 
@@ -55,7 +62,7 @@ public partial class FfmpegManager
         await _ffmpegDetectionSemaphore.WaitAsync();
         try
         {
-            _logMessage("ffmpeg 環境の初期化を開始するのだ。");
+            _logMessage("ffmpeg環境の初期化を開始するのだ。");
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
             var ffmpegBaseDir = Path.Combine(appDirectory, "lib", "ffmpeg");
             _logMessage($"ffmpeg ディレクトリなのだ: {ffmpegBaseDir}");
@@ -71,7 +78,8 @@ public partial class FfmpegManager
                     {
                         _ffmpegPath = binDir;
                         _ffmpegAvailable = true;
-                        _logMessage($"既存の ffmpeg を検出したのだ: {_ffmpegPath}");
+                        _logMessage($"既存のffmpegを検出したのだ: {_ffmpegPath}");
+                        _logMessage("ffmpeg環境の初期化が完了したのだ。");
                         return;
                     }
                 }
@@ -81,16 +89,16 @@ public partial class FfmpegManager
             if (await DownloadAndExtractFfmpegAsync(ffmpegBaseDir))
             {
                 _ffmpegAvailable = true;
-                _logMessage($"ffmpeg の準備が完了したのだ: {_ffmpegPath}");
+                _logMessage($"ffmpeg環境の初期化が完了したのだ: {_ffmpegPath}");
             }
             else
             {
-                _logMessage("ffmpeg の準備に失敗したのだ。音声ファイルの変換に制限が発生する可能性があるのだ。");
+                _logError("ffmpeg環境の初期化に失敗したのだ。音声ファイルの変換に制限が発生する可能性があるのだ。");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"ffmpeg 初期化中に例外なのだ: {ex.Message}");
+            _logError($"ffmpeg 初期化中に例外なのだ: {ex.Message}");
         }
         finally
         {
@@ -126,11 +134,11 @@ public partial class FfmpegManager
 
                 if (totalBytes <= 0)
                 {
-                    _logMessage("警告: ダウンロードサイズが不明なのだ。続行するのだ。");
+                    _logWarning("警告: ダウンロードサイズが不明なのだ。続行するのだ。");
                 }
                 else if (totalBytes > MaxDownloadSize)
                 {
-                    _logMessage($"エラー: ダウンロードサイズが大きすぎるのだ（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
+                    _logError($"エラー: ダウンロードサイズが大きすぎるのだ（{totalBytes / 1024 / 1024 / 1024}GB > 1GB）");
                     throw new InvalidOperationException($"ダウンロードサイズが上限を超えています");
                 }
                 else
@@ -152,7 +160,7 @@ public partial class FfmpegManager
                     totalBytesRead += bytesRead;
                     if (totalBytesRead > MaxDownloadSize)
                     {
-                        _logMessage($"エラー: ダウンロードサイズが上限を超えたのだ");
+                        _logError($"エラー: ダウンロードサイズが上限を超えたのだ");
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
@@ -181,11 +189,12 @@ public partial class FfmpegManager
             _logMessage("ダウンロード完了なのだ、ファイルハンドルを解放中なのだ...");
             await Task.Delay(200);
 
-            _logMessage("ffmpeg を展開中なのだ...");
+            _logMessage("ffmpegを展開中なのだ...");
             _progressCallback?.Invoke(0);
             await Task.Delay(500);
             await ExtractSevenZipAsync(archivePath, ffmpegBaseDir);
             _progressCallback?.Invoke(100);
+            _logMessage("ffmpegの展開が完了したのだ。");
 
             _logMessage("展開完了後の待機中なのだ...");
             await Task.Delay(500);
@@ -197,7 +206,7 @@ public partial class FfmpegManager
             }
             catch (IOException ex)
             {
-                _logMessage($"アーカイブファイルの削除に失敗したのだ（処理は継続するのだ）: {ex.Message}");
+                _logWarning($"アーカイブファイルの削除に失敗したのだ（処理は継続するのだ）: {ex.Message}");
             }
 
             var extractedDirs = Directory.GetDirectories(ffmpegBaseDir, "ffmpeg-*");
@@ -223,14 +232,45 @@ public partial class FfmpegManager
                 }
             }
 
-            _logMessage("ffmpeg の展開に失敗したのだ。");
+            _logError("ffmpeg の展開に失敗したのだ。");
             return false;
         }
         catch (Exception ex)
         {
-            _logMessage($"ffmpeg のダウンロード/展開に失敗したのだ: {ex.Message}");
+            _logError($"ffmpeg のダウンロード/展開に失敗したのだ: {ex.Message}");
             return false;
         }
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool SetDllDirectory(string lpPathName);
+
+    /// <summary>
+    /// 7z.dll が配置されているディレクトリを DLL 検索パスに追加する。
+    /// PublishSingleFile 環境では 7z.dll がアプリのベースディレクトリ直下に
+    /// 存在しない場合があるため、候補パスを順に探索する。
+    /// </summary>
+    private void EnsureSevenZipDllSearchPath()
+    {
+        var baseDir = AppContext.BaseDirectory;
+        var candidatePaths = new[]
+        {
+            Path.Combine(baseDir, "7z.dll"),
+            Path.Combine(baseDir, "x64", "7z.dll"),
+            Path.Combine(baseDir, "runtimes", "win-x64", "native", "7z.dll"),
+        };
+
+        foreach (var candidate in candidatePaths)
+        {
+            if (!File.Exists(candidate)) continue;
+            var dir = Path.GetDirectoryName(candidate)!;
+            _logMessage($"7z.dll 検出なのだ: {candidate}");
+            SetDllDirectory(dir);
+            return;
+        }
+
+        _logWarning($"警告: 7z.dll が見つからないのだ（検索先: {baseDir}）");
     }
 
     /// <summary>
@@ -238,9 +278,11 @@ public partial class FfmpegManager
     /// </summary>
     private async Task ExtractSevenZipAsync(string archivePath, string destinationDir)
     {
+        EnsureSevenZipDllSearchPath();
+
         const int maxRetries = 3;
         var retryCount = 0;
-        
+
         while (retryCount < maxRetries)
         {
             try
@@ -248,25 +290,25 @@ public partial class FfmpegManager
                 await Task.Run(() =>
                 {
                     _logMessage($"7zアーカイブを展開中なのだ: {archivePath} (試行 {retryCount + 1}/{maxRetries})");
-                    
+
                     using (var reader = new ArchiveReader(archivePath))
                     {
                         _logMessage($"展開先なのだ: {destinationDir}");
                         reader.Save(destinationDir);
                     }
-                    
+
                     _logMessage("7zアーカイブの展開が完了したのだ。");
                 });
-                
+
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
-                
+
                 return;
             }
             catch (IOException ex) when (retryCount < maxRetries - 1)
             {
                 retryCount++;
-                _logMessage($"ファイルアクセスエラーなのだ（リトライ {retryCount}/{maxRetries}）: {ex.Message}");
+                _logError($"ファイルアクセスエラーなのだ（リトライ {retryCount}/{maxRetries}）: {ex.Message}");
                 await Task.Delay(1000);
             }
         }

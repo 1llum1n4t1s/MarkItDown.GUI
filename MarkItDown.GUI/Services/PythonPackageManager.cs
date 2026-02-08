@@ -13,16 +13,22 @@ public class PythonPackageManager
 {
     private readonly string _pythonExecutablePath;
     private readonly Action<string> _logMessage;
+    private readonly Action<string> _logError;
+    private readonly Action<string> _logWarning;
 
     /// <summary>
     /// コンストラクタ
     /// </summary>
     /// <param name="pythonExecutablePath">Python 実行ファイルのパス</param>
     /// <param name="logMessage">ログ出力関数</param>
-    public PythonPackageManager(string pythonExecutablePath, Action<string> logMessage)
+    /// <param name="logError">エラーログ用デリゲート（省略時は logMessage を使用）</param>
+    /// <param name="logWarning">警告ログ用デリゲート（省略時は logMessage を使用）</param>
+    public PythonPackageManager(string pythonExecutablePath, Action<string> logMessage, Action<string>? logError = null, Action<string>? logWarning = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
+        _logError = logError ?? logMessage;
+        _logWarning = logWarning ?? logMessage;
     }
 
     /// <summary>
@@ -37,7 +43,7 @@ public class PythonPackageManager
         }
         catch (Exception ex)
         {
-            _logMessage($"パッケージインストールでエラーなのだ: {ex.Message}");
+            _logError($"パッケージインストールでエラーなのだ: {ex.Message}");
         }
     }
 
@@ -59,10 +65,11 @@ public class PythonPackageManager
             }
             // --upgrade 付きで実行し、未インストール時はインストール、インストール済み時は最新に更新
             await InstallPackageWithPipAsync("openai");
+            _logMessage("openaiパッケージの確認が完了したのだ。");
         }
         catch (Exception ex)
         {
-            _logMessage($"openai確認処理でエラーなのだ: {ex.Message}");
+            _logError($"openai確認処理でエラーなのだ: {ex.Message}");
         }
     }
 
@@ -146,16 +153,16 @@ public class PythonPackageManager
             if (!string.IsNullOrEmpty(output))
                 _logMessage($"pip出力: {output.TrimEnd()}");
             if (!string.IsNullOrEmpty(error) && exitCode != 0)
-                _logMessage($"pipエラー: {error.TrimEnd()}");
+                _logError($"pipエラー: {error.TrimEnd()}");
 
             if (exitCode == 0)
                 _logMessage($"{packageName}のインストール/更新が完了したのだ");
             else
-                _logMessage($"{packageName}のインストール/更新に失敗したのだ");
+                _logError($"{packageName}のインストール/更新に失敗したのだ");
         }
         catch (Exception ex)
         {
-            _logMessage($"{packageName}インストールでエラーなのだ: {ex.Message}");
+            _logError($"{packageName}インストールでエラーなのだ: {ex.Message}");
         }
     }
 
@@ -186,12 +193,12 @@ public class PythonPackageManager
             }
             else
             {
-                _logMessage("markitdownのインストールに失敗したのだ");
+                _logError("markitdownのインストールに失敗したのだ");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"markitdown統一処理でエラーなのだ: {ex.Message}");
+            _logError($"markitdown統一処理でエラーなのだ: {ex.Message}");
         }
     }
 
@@ -259,17 +266,19 @@ public class PythonPackageManager
                 "pdfminer-six", "pydub", "python-pptx", "speechrecognition",
                 "xlrd", "youtube-transcript-api", "pathvalidate", "puremagic",
                 "numpy", "azure-ai-documentintelligence", "azure-identity");
+            _logMessage("markitdownの依存パッケージのインストールが完了したのだ。");
 
             // 2. markitdown 本体を --upgrade --no-deps で最新版をインストール
             //    （onnxruntime<=1.20.1 制約を回避するため）
-            _logMessage("markitdown 最新版をインストール中なのだ...");
+            _logMessage("markitdown最新版をインストール中なのだ...");
             await RunPipInstallAsync(
                 "--upgrade", "--no-deps",
                 "markitdown");
+            _logMessage("markitdown最新版のインストールが完了したのだ。");
         }
         catch (Exception ex)
         {
-            _logMessage($"markitdownインストールでエラーなのだ: {ex.Message}");
+            _logError($"markitdownインストールでエラーなのだ: {ex.Message}");
         }
     }
 
@@ -312,11 +321,11 @@ public class PythonPackageManager
             var filteredError = string.Join('\n', filteredErrors).Trim();
             if (!string.IsNullOrEmpty(filteredError))
             {
-                _logMessage($"pipエラー: {filteredError}");
+                _logError($"pipエラー: {filteredError}");
             }
         }
 
         if (exitCode != 0)
-            _logMessage("pipインストールに失敗したのだ");
+            _logError("pipインストールに失敗したのだ");
     }
 }

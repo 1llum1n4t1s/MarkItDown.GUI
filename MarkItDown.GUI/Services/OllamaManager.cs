@@ -16,7 +16,10 @@ namespace MarkItDown.GUI.Services;
 public class OllamaManager : IDisposable
 {
     private readonly Action<string> _logMessage;
+    private readonly Action<string> _logError;
+    private readonly Action<string> _logWarning;
     private readonly Action<double>? _progressCallback;
+    private readonly Action<string>? _statusCallback;
     private readonly HttpClient _httpClient;
     private string _ollamaUrl = "http://localhost:11434";
     private const string DefaultModelName = "gemma3:4b";
@@ -51,10 +54,14 @@ public class OllamaManager : IDisposable
     /// </summary>
     /// <param name="logMessage">ログ出力関数</param>
     /// <param name="progressCallback">進捗コールバック関数（オプション）</param>
-    public OllamaManager(Action<string> logMessage, Action<double>? progressCallback = null)
+    /// <param name="statusCallback">ステータスメッセージ更新コールバック（オプション）</param>
+    public OllamaManager(Action<string> logMessage, Action<double>? progressCallback = null, Action<string>? statusCallback = null, Action<string>? logError = null, Action<string>? logWarning = null)
     {
         _logMessage = logMessage;
+        _logError = logError ?? logMessage;
+        _logWarning = logWarning ?? logMessage;
         _progressCallback = progressCallback;
+        _statusCallback = statusCallback;
         _httpClient = new HttpClient
         {
             Timeout = TimeSpan.FromSeconds(30)
@@ -97,6 +104,7 @@ public class OllamaManager : IDisposable
             if (string.IsNullOrEmpty(_ollamaExePath))
             {
                 _logMessage("埋め込みOllamaが見つからないため、ダウンロードを試行するのだ。");
+                _statusCallback?.Invoke("Ollama本体をダウンロード中...");
                 if (await DownloadAndExtractOllamaAsync(ollamaBaseDir))
                 {
                     _logMessage($"Ollamaの準備が完了したのだ: {_ollamaExePath}");
@@ -104,7 +112,7 @@ public class OllamaManager : IDisposable
                 }
                 else
                 {
-                    _logMessage("Ollamaのダウンロードに失敗したのだ。画像説明機能は無効になるのだ。");
+                    _logError("Ollamaのダウンロードに失敗したのだ。画像説明機能は無効になるのだ。");
                     _isAvailable = false;
                     return;
                 }
@@ -112,13 +120,16 @@ public class OllamaManager : IDisposable
 
             if (!needsStartup)
             {
+                _statusCallback?.Invoke("Ollamaサーバーの接続を確認中...");
                 _isAvailable = await CheckOllamaAvailabilityAsync();
             }
 
             if (!_isAvailable || needsStartup)
             {
+                _statusCallback?.Invoke("Ollamaサーバーを起動中...");
                 _logMessage("Ollamaサーバーを起動するのだ...");
                 await StartOllamaServerAsync();
+                _statusCallback?.Invoke("Ollamaサーバーの応答を待機中...");
                 await Task.Delay(5000);
                 _isAvailable = await CheckOllamaAvailabilityAsync();
             }
@@ -126,21 +137,24 @@ public class OllamaManager : IDisposable
             if (_isAvailable)
             {
                 _logMessage("Ollamaが利用可能なのだ。");
+                _statusCallback?.Invoke("モデルの確認中...");
                 var hasModel = await CheckModelAvailabilityAsync(DefaultModelName);
                 if (!hasModel)
                 {
                     _logMessage($"モデル '{DefaultModelName}' が見つからないのだ。ダウンロードを開始するのだ...");
+                    _statusCallback?.Invoke($"{DefaultModelName} モデルをダウンロード中...");
                     await DownloadModelAsync(DefaultModelName);
                 }
+                _logMessage("Ollama環境の初期化が完了したのだ。");
             }
             else
             {
-                _logMessage("Ollamaの起動に失敗したのだ。画像説明機能は無効になるのだ。");
+                _logError("Ollamaの起動に失敗したのだ。画像説明機能は無効になるのだ。");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"Ollama初期化中にエラーが発生したのだ: {ex.Message}");
+            _logError($"Ollama初期化中にエラーが発生したのだ: {ex.Message}");
             _isAvailable = false;
         }
     }
@@ -162,18 +176,18 @@ public class OllamaManager : IDisposable
             }
             else
             {
-                _logMessage($"Ollamaへの接続に失敗したのだ。ステータスコード: {response.StatusCode}");
+                _logError($"Ollamaへの接続に失敗したのだ。ステータスコード: {response.StatusCode}");
                 return false;
             }
         }
         catch (HttpRequestException ex)
         {
-            _logMessage($"Ollamaへの接続エラーなのだ: {ex.Message}");
+            _logError($"Ollamaへの接続エラーなのだ: {ex.Message}");
             return false;
         }
         catch (Exception ex)
         {
-            _logMessage($"Ollama接続テスト中にエラーなのだ: {ex.Message}");
+            _logError($"Ollama接続テスト中にエラーなのだ: {ex.Message}");
             return false;
         }
     }
@@ -205,18 +219,19 @@ public class OllamaManager : IDisposable
                         var nameStr = name.GetString();
                         if (nameStr != null && nameStr.StartsWith(modelName, StringComparison.OrdinalIgnoreCase))
                         {
-                            _logMessage($"モデル '{modelName}' が見つかったのだ。");
+                            _logMessage($"モデル '{modelName}' の確認が完了したのだ（インストール済み）。");
                             return true;
                         }
                     }
                 }
             }
 
+            _logMessage($"モデル '{modelName}' の確認が完了したのだ（未インストール）。");
             return false;
         }
         catch (Exception ex)
         {
-            _logMessage($"モデル確認中にエラーなのだ: {ex.Message}");
+            _logError($"モデル確認中にエラーなのだ: {ex.Message}");
             return false;
         }
     }
@@ -264,7 +279,7 @@ public class OllamaManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logMessage($"モデル一覧取得中にエラーなのだ: {ex.Message}");
+            _logError($"モデル一覧取得中にエラーなのだ: {ex.Message}");
             return Array.Empty<string>();
         }
     }
@@ -289,6 +304,7 @@ public class OllamaManager : IDisposable
             var archivePath = Path.Combine(ollamaBaseDir, fileName);
 
             _logMessage($"Ollamaをダウンロード中なのだ: {downloadUrl}");
+            _statusCallback?.Invoke("Ollama本体をダウンロード中...");
             _progressCallback?.Invoke(0);
 
             using (var response = await HttpClientForDownload.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
@@ -302,11 +318,11 @@ public class OllamaManager : IDisposable
 
                 if (totalBytes <= 0)
                 {
-                    _logMessage("警告: ダウンロードサイズが不明なのだ。続行するのだ。");
+                    _logWarning("警告: ダウンロードサイズが不明なのだ。続行するのだ。");
                 }
                 else if (totalBytes > MaxDownloadSize)
                 {
-                    _logMessage($"エラー: ダウンロードサイズが大きすぎるのだ（{totalBytes / 1024.0 / 1024.0 / 1024.0:F2}GB > 2GB）");
+                    _logError($"エラー: ダウンロードサイズが大きすぎるのだ（{totalBytes / 1024.0 / 1024.0 / 1024.0:F2}GB > 2GB）");
                     throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                 }
                 else
@@ -328,7 +344,7 @@ public class OllamaManager : IDisposable
                     totalBytesRead += bytesRead;
                     if (totalBytesRead > MaxDownloadSize)
                     {
-                        _logMessage($"エラー: ダウンロードサイズが上限を超えたのだ");
+                        _logError($"エラー: ダウンロードサイズが上限を超えたのだ");
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
@@ -358,6 +374,7 @@ public class OllamaManager : IDisposable
 
             _isExtracting = true;
             _progressCallback?.Invoke(0);
+            _statusCallback?.Invoke("Ollamaを展開中...");
             _logMessage("Ollamaアーカイブを展開中なのだ...");
             
             await Task.Run(() =>
@@ -388,13 +405,13 @@ public class OllamaManager : IDisposable
                     if (extractedCount % 5 == 0 || extractedCount == totalEntries)
                     {
                         _progressCallback?.Invoke(progress);
+                        _statusCallback?.Invoke($"Ollamaを展開中... {progress:F0}%");
                         _logMessage($"展開中なのだ: {extractedCount}/{totalEntries} ファイル ({progress:F1}%)");
                     }
                 }
             });
             
             _progressCallback?.Invoke(100);
-            _isExtracting = false;
             _logMessage("Ollamaの展開が完了したのだ。");
 
             await Task.Delay(500);
@@ -407,7 +424,7 @@ public class OllamaManager : IDisposable
             }
             catch (IOException ex)
             {
-                _logMessage($"アーカイブファイルの削除に失敗したのだ: {ex.Message}");
+                _logWarning($"アーカイブファイルの削除に失敗したのだ: {ex.Message}");
             }
 
             _logMessage("Ollama実行ファイルを確認中なのだ...");
@@ -424,8 +441,12 @@ public class OllamaManager : IDisposable
         }
         catch (Exception ex)
         {
-            _logMessage($"Ollamaのダウンロード/展開に失敗したのだ: {ex.Message}");
+            _logError($"Ollamaのダウンロード/展開に失敗したのだ: {ex.Message}");
             return false;
+        }
+        finally
+        {
+            _isExtracting = false;
         }
     }
 
@@ -498,12 +519,12 @@ public class OllamaManager : IDisposable
             }
             else
             {
-                _logMessage("Ollamaプロセスの起動に失敗したのだ。");
+                _logError("Ollamaプロセスの起動に失敗したのだ。");
             }
         }
         catch (Exception ex)
         {
-            _logMessage($"Ollamaサーバー起動中にエラーなのだ: {ex.Message}");
+            _logError($"Ollamaサーバー起動中にエラーなのだ: {ex.Message}");
         }
     }
 
@@ -530,7 +551,7 @@ public class OllamaManager : IDisposable
     }
 
     /// <summary>
-    /// モデルをダウンロードする
+    /// モデルをダウンロードする（リアルタイム進捗表示付き）
     /// </summary>
     private async Task DownloadModelAsync(string modelName)
     {
@@ -543,6 +564,7 @@ public class OllamaManager : IDisposable
             }
 
             _logMessage($"モデル '{modelName}' をダウンロード中なのだ...");
+            _progressCallback?.Invoke(0);
 
             var startInfo = new ProcessStartInfo
             {
@@ -561,38 +583,109 @@ public class OllamaManager : IDisposable
             using var process = Process.Start(startInfo);
             if (process != null)
             {
-                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
+                using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(30));
+                var tcs = new TaskCompletionSource<bool>();
 
-                // ReadToEndAsync と WaitForExitAsync を並列実行してデッドロックを回避
-                var outputTask = process.StandardOutput.ReadToEndAsync(cts.Token);
-                var errorTask = process.StandardError.ReadToEndAsync(cts.Token);
+                // stderr からリアルタイムで進捗をパース
+                // ollama pull の出力例:
+                //   pulling manifest
+                //   pulling abc123... 45% ▕██████        ▏ 1.5 GB/3.3 GB
+                //   verifying sha256 digest
+                //   writing manifest
+                //   success
+                var lastLoggedPercent = -1;
+
+                process.ErrorDataReceived += (sender, e) =>
+                {
+                    if (string.IsNullOrEmpty(e.Data))
+                        return;
+
+                    var line = e.Data;
+
+                    // 進捗パーセントをパース（例: "45%" や "pulling abc123... 45%"）
+                    var percentMatch = System.Text.RegularExpressions.Regex.Match(line, @"(\d+)%");
+                    if (percentMatch.Success && int.TryParse(percentMatch.Groups[1].Value, out var percent))
+                    {
+                        _progressCallback?.Invoke(percent);
+
+                        // ステータスにサイズ情報を含める（例: "1.5 GB/3.3 GB"）
+                        var sizeMatch = System.Text.RegularExpressions.Regex.Match(
+                            line, @"([\d.]+\s*[KMGT]?B)\s*/\s*([\d.]+\s*[KMGT]?B)");
+                        if (sizeMatch.Success)
+                        {
+                            _statusCallback?.Invoke(
+                                $"{modelName} ダウンロード中... {percent}%（{sizeMatch.Groups[1].Value}/{sizeMatch.Groups[2].Value}）");
+                        }
+                        else
+                        {
+                            _statusCallback?.Invoke($"{modelName} ダウンロード中... {percent}%");
+                        }
+
+                        // ログは10%刻みで出力（大量のログを防ぐ）
+                        if (percent / 10 > lastLoggedPercent / 10)
+                        {
+                            lastLoggedPercent = percent;
+                            _logMessage($"モデルダウンロード進捗なのだ: {percent}% - {line.Trim()}");
+                        }
+                    }
+                    else
+                    {
+                        // 進捗以外のステータス行（pulling manifest, verifying, writing manifest 等）
+                        if (line.Contains("pulling manifest", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _statusCallback?.Invoke($"{modelName} マニフェストを取得中...");
+                        }
+                        else if (line.Contains("verifying", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _statusCallback?.Invoke($"{modelName} を検証中...");
+                            _progressCallback?.Invoke(100);
+                        }
+                        else if (line.Contains("writing manifest", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _statusCallback?.Invoke($"{modelName} のマニフェストを書き込み中...");
+                        }
+                        else if (line.Contains("success", StringComparison.OrdinalIgnoreCase))
+                        {
+                            _statusCallback?.Invoke($"{modelName} のダウンロード完了");
+                            _progressCallback?.Invoke(100);
+                        }
+
+                        _logMessage($"Ollama pull: {line.Trim()}");
+                    }
+                };
+
+                process.OutputDataReceived += (sender, e) =>
+                {
+                    if (!string.IsNullOrEmpty(e.Data))
+                    {
+                        _logMessage($"Ollama pull出力: {e.Data}");
+                    }
+                };
+
+                process.BeginErrorReadLine();
+                process.BeginOutputReadLine();
+
                 await process.WaitForExitAsync(cts.Token);
-
-                var output = await outputTask;
-                var error = await errorTask;
-
-                if (!string.IsNullOrEmpty(output))
-                {
-                    _logMessage($"Ollama pull出力: {output}");
-                }
-                if (!string.IsNullOrEmpty(error))
-                {
-                    _logMessage($"Ollama pullエラー: {error}");
-                }
 
                 if (process.ExitCode == 0)
                 {
                     _logMessage($"モデル '{modelName}' のダウンロードが完了したのだ。");
+                    _statusCallback?.Invoke($"{modelName} モデルの準備完了");
+                    _progressCallback?.Invoke(100);
                 }
                 else
                 {
-                    _logMessage($"モデル '{modelName}' のダウンロードに失敗したのだ。");
+                    _logError($"モデル '{modelName}' のダウンロードに失敗したのだ。");
                 }
             }
         }
+        catch (OperationCanceledException)
+        {
+            _logMessage($"モデル '{modelName}' のダウンロードがタイムアウトしたのだ。");
+        }
         catch (Exception ex)
         {
-            _logMessage($"モデルダウンロード中にエラーなのだ: {ex.Message}");
+            _logError($"モデルダウンロード中にエラーなのだ: {ex.Message}");
         }
     }
 
@@ -645,6 +738,17 @@ public class OllamaManager : IDisposable
                         try
                         {
                             _logMessage("Ollamaプロセスの終了を待機中にタイムアウトしたのだ。");
+                        }
+                        catch
+                        {
+                            // ログ出力が失敗しても続行
+                        }
+                    }
+                    else
+                    {
+                        try
+                        {
+                            _logMessage("Ollamaサーバーの停止が完了したのだ。");
                         }
                         catch
                         {
@@ -733,7 +837,7 @@ public class OllamaManager : IDisposable
                     // 予期しないエラーはログに記録
                     try
                     {
-                        _logMessage($"孤立プロセス終了中のエラーなのだ (PID: {process.Id}): {ex.Message}");
+                        _logWarning($"孤立プロセス終了中のエラーなのだ (PID: {process.Id}): {ex.Message}");
                     }
                     catch
                     {
@@ -751,7 +855,7 @@ public class OllamaManager : IDisposable
             // 孤立プロセスのクリーンアップ失敗時も具体的なエラーを記録
             try
             {
-                _logMessage($"孤立Ollamaプロセス取得エラーなのだ: {ex.Message}");
+                _logWarning($"孤立Ollamaプロセス取得エラーなのだ: {ex.Message}");
             }
             catch
             {

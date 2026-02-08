@@ -21,15 +21,17 @@ public sealed class WebScraperService : IDisposable
     private readonly HttpClient _httpClient;
     private readonly HttpClient _ollamaClient;
     private readonly Action<string> _logMessage;
+    private readonly Action<string> _logError;
     private readonly Action<string>? _statusCallback;
     private PlaywrightScraperService? _playwrightScraper;
     private string? _ollamaUrl;
     private string? _ollamaModel;
 
-    public WebScraperService(Action<string> logMessage, Action<string>? statusCallback = null)
+    public WebScraperService(Action<string> logMessage, Action<string>? statusCallback = null, Action<string>? logError = null)
     {
         _statusCallback = statusCallback;
         _logMessage = logMessage;
+        _logError = logError ?? logMessage;
         var handler = new SocketsHttpHandler
         {
             AutomaticDecompression = System.Net.DecompressionMethods.All,
@@ -241,7 +243,7 @@ public sealed class WebScraperService : IDisposable
         }
         catch (HttpRequestException ex)
         {
-            _logMessage($"Ollama への接続に失敗したのだ: {ex.Message}");
+            _logError($"Ollama への接続に失敗したのだ: {ex.Message}");
             _logMessage("元のJSONをそのまま保持するのだ。");
         }
         catch (TaskCanceledException)
@@ -250,7 +252,7 @@ public sealed class WebScraperService : IDisposable
         }
         catch (Exception ex)
         {
-            _logMessage($"JSON整形中にエラーが発生したのだ: {ex.Message}");
+            _logError($"JSON整形中にエラーが発生したのだ: {ex.Message}");
             _logMessage("元のJSONをそのまま保持するのだ。");
         }
     }
@@ -298,7 +300,7 @@ public sealed class WebScraperService : IDisposable
         }
         catch (JsonException)
         {
-            _logMessage("JSON解析エラーのため、一括で整形を試みるのだ...");
+            _logError("JSON解析エラーのため、一括で整形を試みるのだ...");
             return await FormatJsonChunkWithOllamaAsync(rawJson, ct);
         }
     }
