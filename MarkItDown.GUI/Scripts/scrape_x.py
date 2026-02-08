@@ -376,22 +376,18 @@ def _check_loading(page) -> bool:
 
 def _human_scroll(page, distance: float = 1500):
     """
-    マウスホイールイベントでスクロールする（BOT検知回避）。
-    window.scrollBy 等の JS API を使わず、ネイティブのホイールイベントを発火する。
-    distance は合計のスクロール量（px）。複数回に分けてスクロールする。
-    速度重視: ステップ間の遅延を最小限に抑える。
+    キーボードの PageDown キーでスクロールする（BOT検知回避）。
+    JS API や mouse.wheel は CDP 経由で検知されやすいため、
+    キーボードイベントを使用する。PageDown 1回 ≒ viewport高さ分スクロール（約900px）。
     """
-    # ページ中央付近にマウスを移動（ホイールイベントの発火元）
-    page.mouse.move(640, 450)
-    # 2〜3回に分割してスクロール（高速だがネイティブイベント）
-    remaining = distance
-    while remaining > 0:
-        # 1回あたり500〜1000pxの大きめホイールイベント
-        step = min(remaining, random.uniform(500, 1000))
-        page.mouse.wheel(0, step)
-        remaining -= step
-        if remaining > 0:
-            time.sleep(random.uniform(0.01, 0.03))
+    # ページ本体にフォーカスを確保（入力欄等にフォーカスがあるとキーが効かない）
+    page.keyboard.press("Escape")
+    # distance に応じて PageDown を複数回押す（1回 ≒ 900px）
+    presses = max(1, round(distance / 900))
+    for i in range(presses):
+        page.keyboard.press("PageDown")
+        if i < presses - 1:
+            time.sleep(random.uniform(0.03, 0.08))
 
 
 def _handle_interruptions(page):
