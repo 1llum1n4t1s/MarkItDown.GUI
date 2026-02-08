@@ -43,6 +43,8 @@ def create_openai_client(ollama_url):
         log_message(f'OpenAIクライアント作成に失敗: {e}')
         return None
 
+LLM_PROMPT = "この画像について詳しく説明してください。画像の内容、オブジェクト、色、雰囲気などを含めて説明してください。日本語で回答してください。"
+
 def create_markitdown_instance(ollama_client, ollama_model):
     """MarkItDownインスタンスを作成する。Ollama設定があればネイティブLLM統合を使用する。"""
     import markitdown
@@ -52,7 +54,7 @@ def create_markitdown_instance(ollama_client, ollama_model):
             md = markitdown.MarkItDown(
                 llm_client=ollama_client,
                 llm_model=ollama_model,
-                llm_prompt="この画像について詳しく説明してください。画像の内容、オブジェクト、色、雰囲気などを含めて説明してください。日本語で回答してください。"
+                llm_prompt=LLM_PROMPT,
             )
             log_message(f'MarkItDownインスタンス作成（Ollama統合有効、モデル: {ollama_model}）')
             return md
@@ -168,7 +170,7 @@ try:
                     markdown_content += f"- 拡張子: {file_ext}\n\n"
                     markdown_content += f"![{file_name}]({file_path})\n\n"
                     markdown_content += "注: この画像にはテキスト情報が含まれていないか、OCR処理でテキストが検出されませんでした。\n"
-                    markdown_content += "画像の内容を説明するには、Ollama (llava モデル推奨) を使用してください。\n"
+                    markdown_content += "画像の内容を説明するには、Ollama (gemma3 モデル推奨) を使用してください。\n"
                     log_message(f'画像ファイル情報を追加しました')
                 else:
                     markdown_content = f"# {file_name}\n\n変換結果が空でした。\n"

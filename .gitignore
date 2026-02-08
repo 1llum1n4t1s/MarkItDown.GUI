@@ -1,7 +1,9 @@
 .idea/
 .vs/
 .vscode/
+.claude/
 *.csproj.user
 *.suo
 bin/
 obj/
+%temp%/

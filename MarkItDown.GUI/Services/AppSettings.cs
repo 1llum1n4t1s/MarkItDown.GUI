@@ -168,61 +168,6 @@ public class AppSettings
     }
 
     /// <summary>
-    /// Ollamaで使用するモデル名を取得する
-    /// </summary>
-    public static string? GetOllamaModel()
-    {
-        try
-        {
-            var model = _settingsDocument?.Root?.Element("OllamaModel")?.Value;
-            return string.IsNullOrWhiteSpace(model) ? null : model.Trim();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Ollamaで使用するモデル名を保存する
-    /// </summary>
-    /// <param name="model">モデル名（例: llava）</param>
-    public static void SetOllamaModel(string? model)
-    {
-        try
-        {
-            var root = _settingsDocument?.Root;
-            if (root is null)
-            {
-                return;
-            }
-
-            var element = root.Element("OllamaModel");
-            if (string.IsNullOrEmpty(model))
-            {
-                element?.Remove();
-            }
-            else
-            {
-                if (element is null)
-                {
-                    root.Add(new XElement("OllamaModel", model));
-                }
-                else
-                {
-                    element.Value = model;
-                }
-            }
-
-            _settingsDocument?.Save(SettingsPath);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to save OllamaModel: {ex.Message}");
-        }
-    }
-
-    /// <summary>
     /// Ollamaで使用するGPUデバイスIDを取得する
     /// </summary>
     /// <returns>GPUデバイスID（例: 0, 1, -1）。nullの場合はデフォルト値を使用</returns>
@@ -297,7 +242,6 @@ public class AppSettings
                 new XElement("UpdateFeedUrl", GetDefaultUpdateFeedUrl()),
                 new XElement("PythonVersion", ""),
                 new XElement("OllamaUrl", "http://localhost:11434"),
-                new XElement("OllamaModel", "llava"),
                 new XElement("OllamaGpuDevice", "0")
             );
 

@@ -9,7 +9,7 @@ Usage:
 
 環境変数:
     OLLAMA_URL   - Ollama の API エンドポイント (例: http://localhost:11434)
-    OLLAMA_MODEL - 使用するモデル名 (例: llava)
+    OLLAMA_MODEL - 使用するモデル名 (例: gemma3:4b)
 
 出力: JSON形式のページデータ
 """
@@ -147,9 +147,16 @@ def get_page_summary(page, url: str) -> dict:
     return summary
 
 
+MULTIMODAL_MODELS = {"gemma3"}
+
+def _is_multimodal_model(model_name: str) -> bool:
+    """モデル名がマルチモーダル（画像入力対応）モデルかどうかを判定する。"""
+    name = model_name.lower()
+    return any(m in name for m in MULTIMODAL_MODELS)
+
 def capture_page_screenshot(page, ollama_model: str) -> str | None:
-    """llava モデル用にスクリーンショットを取得し、base64 で返す"""
-    if "llava" not in ollama_model.lower():
+    """マルチモーダルモデル用にスクリーンショットを取得し、base64 で返す"""
+    if not _is_multimodal_model(ollama_model):
         return None
 
     try:
@@ -194,8 +201,8 @@ def generate_scraping_strategy(
         },
     ]
 
-    # llava の場合はスクリーンショットも送信（マルチモーダル）
-    if screenshot_b64 and "llava" in ollama_model.lower():
+    # マルチモーダルモデルの場合はスクリーンショットも送信
+    if screenshot_b64 and _is_multimodal_model(ollama_model):
         messages[-1] = {
             "role": "user",
             "content": [

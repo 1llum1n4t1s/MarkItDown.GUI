@@ -160,22 +160,34 @@ public class PythonPackageManager
     }
 
     /// <summary>
-    /// markitdown パッケージの状態をチェックし、インストールまたは最新バージョンに更新する
+    /// markitdown パッケージの状態をチェックし、最新バージョンにインストール/更新する
     /// </summary>
     private async Task CheckAndUnifyMarkItDownInstallationAsync()
     {
         try
         {
-            if (!await CheckPackageInstalledAsync("markitdown"))
+            var currentVersion = await GetPackageVersionAsync("markitdown");
+            if (currentVersion is null)
             {
                 _logMessage("markitdownパッケージが不足しているのでpipでインストールするのだ");
             }
             else
             {
-                _logMessage("markitdownパッケージの最新バージョンを確認中...");
+                _logMessage($"markitdown {currentVersion} がインストール済み。最新バージョンを確認中...");
             }
-            // --upgrade 付きで実行し、未インストール時はインストール、インストール済み時は最新に更新
+
             await InstallMarkItDownWithPipAsync();
+
+            // インストール後のバージョン確認
+            var installedVersion = await GetPackageVersionAsync("markitdown");
+            if (installedVersion is not null)
+            {
+                _logMessage($"markitdown {installedVersion} のインストールが完了したのだ");
+            }
+            else
+            {
+                _logMessage("markitdownのインストールに失敗しました");
+            }
         }
         catch (Exception ex)
         {
@@ -184,13 +196,14 @@ public class PythonPackageManager
     }
 
     /// <summary>
-    /// pip で markitdown をアンインストールする
+    /// インストール済みパッケージのバージョンを取得する
     /// </summary>
-    private async Task UninstallMarkItDownWithPipAsync()
+    /// <param name="packageName">パッケージ名</param>
+    /// <returns>バージョン文字列（未インストールの場合は null）</returns>
+    private async Task<string?> GetPackageVersionAsync(string packageName)
     {
         try
         {
-            _logMessage("pipでmarkitdownをアンインストール中...");
             var startInfo = new ProcessStartInfo
             {
                 FileName = _pythonExecutablePath,
@@ -198,89 +211,112 @@ public class PythonPackageManager
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
+                StandardOutputEncoding = Encoding.UTF8
             };
 
             startInfo.ArgumentList.Add("-m");
             startInfo.ArgumentList.Add("pip");
-            startInfo.ArgumentList.Add("uninstall");
-            startInfo.ArgumentList.Add("markitdown");
-            startInfo.ArgumentList.Add("-y");
+            startInfo.ArgumentList.Add("show");
+            startInfo.ArgumentList.Add(packageName);
 
-            var (exitCode, output, error) = await ProcessUtils.RunAsync(
-                startInfo, TimeoutSettings.PackageUninstallTimeoutMs);
+            var (exitCode, output, _) = await ProcessUtils.RunAsync(
+                startInfo, TimeoutSettings.PythonVersionCheckTimeoutMs);
 
-            if (!string.IsNullOrEmpty(output))
-                _logMessage($"pipアンインストール出力: {output.TrimEnd()}");
-            if (!string.IsNullOrEmpty(error))
-                _logMessage($"pipアンインストールエラー: {error.TrimEnd()}");
+            if (exitCode != 0 || string.IsNullOrEmpty(output))
+                return null;
 
-            if (exitCode == 0)
-                _logMessage("markitdownのアンインストールが完了したのだ");
-            else
-                _logMessage("markitdownのアンインストールに失敗したのだ");
+            foreach (var line in output.Split('\n'))
+            {
+                if (line.StartsWith("Version:", StringComparison.OrdinalIgnoreCase))
+                    return line["Version:".Length..].Trim();
+            }
+
+            return null;
         }
-        catch (Exception ex)
+        catch
         {
-            _logMessage($"markitdownアンインストールでエラー: {ex.Message}");
+            return null;
         }
     }
 
     /// <summary>
-    /// pip で markitdown をインストール/更新する
+    /// pip で markitdown をインストール/更新する。
+    /// markitdown 0.1.x は onnxruntime&lt;=1.20.1 を要求するが、Python 3.14 では
+    /// onnxruntime 1.24.1+ しか利用できないため、依存を先にインストールしてから
+    /// markitdown 本体を --no-deps で入れる。
     /// </summary>
     private async Task InstallMarkItDownWithPipAsync()
     {
         try
         {
-            _logMessage("pipでmarkitdownをインストール/更新中...");
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = _pythonExecutablePath,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            };
+            // 1. extras 依存パッケージを先にインストール（markitdown[all] の依存群）
+            _logMessage("markitdownの依存パッケージをインストール中...");
+            await RunPipInstallAsync(
+                "--upgrade",
+                "magika>=0.6.1",
+                "beautifulsoup4", "charset-normalizer", "defusedxml", "markdownify",
+                "requests", "lxml", "mammoth", "olefile", "openpyxl", "pandas",
+                "pdfminer-six", "pydub", "python-pptx", "speechrecognition",
+                "xlrd", "youtube-transcript-api", "pathvalidate", "puremagic",
+                "numpy", "azure-ai-documentintelligence", "azure-identity");
 
-            startInfo.ArgumentList.Add("-m");
-            startInfo.ArgumentList.Add("pip");
-            startInfo.ArgumentList.Add("install");
-            startInfo.ArgumentList.Add("--upgrade");
-            startInfo.ArgumentList.Add("markitdown[all]");
-
-            var (exitCode, output, error) = await ProcessUtils.RunAsync(
-                startInfo, TimeoutSettings.PackageInstallTimeoutMs);
-
-            if (!string.IsNullOrEmpty(output))
-                _logMessage($"pip出力: {output.TrimEnd()}");
-
-            if (!string.IsNullOrEmpty(error) && exitCode != 0)
-            {
-                var errorLines = error.Split('\n', StringSplitOptions.RemoveEmptyEntries);
-                var filteredErrors = errorLines.Where(line =>
-                    !line.Contains("WARNING: The script") &&
-                    !line.Contains("is installed in") &&
-                    !line.Contains("which is not on PATH") &&
-                    !line.Contains("Consider adding this directory to PATH"));
-                var filteredError = string.Join('\n', filteredErrors).Trim();
-                if (!string.IsNullOrEmpty(filteredError))
-                {
-                    _logMessage($"pipエラー: {filteredError}");
-                }
-            }
-
-            if (exitCode == 0)
-                _logMessage("markitdownのインストール/更新が完了したのだ");
-            else
-                _logMessage("markitdownのインストール/更新に失敗したのだ");
+            // 2. markitdown 本体を --upgrade --no-deps で最新版をインストール
+            //    （onnxruntime<=1.20.1 制約を回避するため）
+            _logMessage("markitdown 最新版をインストール中...");
+            await RunPipInstallAsync(
+                "--upgrade", "--no-deps",
+                "markitdown");
         }
         catch (Exception ex)
         {
             _logMessage($"markitdownインストールでエラー: {ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// pip install を任意の引数で実行する
+    /// </summary>
+    private async Task RunPipInstallAsync(params string[] args)
+    {
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _pythonExecutablePath,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        startInfo.ArgumentList.Add("-m");
+        startInfo.ArgumentList.Add("pip");
+        startInfo.ArgumentList.Add("install");
+        foreach (var arg in args)
+            startInfo.ArgumentList.Add(arg);
+
+        var (exitCode, output, error) = await ProcessUtils.RunAsync(
+            startInfo, TimeoutSettings.PackageInstallTimeoutMs);
+
+        if (!string.IsNullOrEmpty(output))
+            _logMessage($"pip出力: {output.TrimEnd()}");
+
+        if (!string.IsNullOrEmpty(error) && exitCode != 0)
+        {
+            var errorLines = error.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            var filteredErrors = errorLines.Where(line =>
+                !line.Contains("WARNING: The script") &&
+                !line.Contains("is installed in") &&
+                !line.Contains("which is not on PATH") &&
+                !line.Contains("Consider adding this directory to PATH"));
+            var filteredError = string.Join('\n', filteredErrors).Trim();
+            if (!string.IsNullOrEmpty(filteredError))
+            {
+                _logMessage($"pipエラー: {filteredError}");
+            }
+        }
+
+        if (exitCode != 0)
+            _logMessage("pipインストールに失敗しました");
     }
 }

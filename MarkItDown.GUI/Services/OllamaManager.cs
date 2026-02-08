@@ -19,7 +19,7 @@ public class OllamaManager : IDisposable
     private readonly Action<double>? _progressCallback;
     private readonly HttpClient _httpClient;
     private string _ollamaUrl = "http://localhost:11434";
-    private string _defaultModel = "llava";
+    private const string DefaultModelName = "gemma3:4b";
     private bool _isAvailable;
     private Process? _ollamaProcess;
     private string _ollamaExePath = string.Empty;
@@ -44,7 +44,7 @@ public class OllamaManager : IDisposable
     /// <summary>
     /// 使用するデフォルトのモデル名
     /// </summary>
-    public string DefaultModel => _defaultModel;
+    public string DefaultModel => DefaultModelName;
 
     /// <summary>
     /// コンストラクタ
@@ -76,14 +76,8 @@ public class OllamaManager : IDisposable
                 _ollamaUrl = savedUrl;
             }
 
-            var savedModel = AppSettings.GetOllamaModel();
-            if (!string.IsNullOrEmpty(savedModel))
-            {
-                _defaultModel = savedModel;
-            }
-
             _logMessage($"Ollama URL: {_ollamaUrl}");
-            _logMessage($"Ollama モデル: {_defaultModel}");
+            _logMessage($"Ollama モデル: {DefaultModelName}");
 
             var appDirectory = AppDomain.CurrentDomain.BaseDirectory;
             var ollamaBaseDir = Path.Combine(appDirectory, "lib", "ollama");
@@ -132,11 +126,11 @@ public class OllamaManager : IDisposable
             if (_isAvailable)
             {
                 _logMessage("Ollamaが利用可能です。");
-                var hasModel = await CheckModelAvailabilityAsync(_defaultModel);
+                var hasModel = await CheckModelAvailabilityAsync(DefaultModelName);
                 if (!hasModel)
                 {
-                    _logMessage($"モデル '{_defaultModel}' が見つかりません。ダウンロードを開始します...");
-                    await DownloadModelAsync(_defaultModel);
+                    _logMessage($"モデル '{DefaultModelName}' が見つかりません。ダウンロードを開始します...");
+                    await DownloadModelAsync(DefaultModelName);
                 }
             }
             else

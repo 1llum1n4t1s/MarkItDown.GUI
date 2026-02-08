@@ -33,6 +33,10 @@ internal static class Program
                 return 0;
             }
         }
+        catch (Velopack.Exceptions.NotInstalledException)
+        {
+            Logger.Log("開発環境のため更新チェックをスキップしました", LogLevel.Debug);
+        }
         catch (Exception ex)
         {
             Logger.LogException("更新チェック中にエラーが発生しました", ex);
