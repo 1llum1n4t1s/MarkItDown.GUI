@@ -28,6 +28,17 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private const int MaxLogLines = 10000; // ログ行数上限（メモリ節約）
     private int _logLineCount = 1;
 
+    // 並列ダウンロード進捗の個別追跡（スレッドセーフにするため lock で保護）
+    private readonly object _progressLock = new();
+    private double _pythonProgress;
+    private double _ffmpegProgress;
+    private double _ollamaProgress;
+    private string _pythonStatus = string.Empty;
+    private string _ffmpegStatus = string.Empty;
+    private string _ollamaStatus = string.Empty;
+    // 現在アクティブなダウンロードタスク数（0 なら IsDownloading=false）
+    private int _activeDownloadCount;
+
     private static readonly IBrush DefaultDropZoneBrush = new SolidColorBrush(Color.Parse("#D3D3D3"));
     private static readonly IBrush DragOverBrush = new SolidColorBrush(Color.Parse("#ADD8E6"));
     private static readonly IBrush ProcessingBrush = new SolidColorBrush(Color.Parse("#FFFFE0"));
@@ -146,10 +157,26 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             var pythonExe = pythonEnvironmentManager.PythonExecutablePath;
             var pythonPackageManager = new PythonPackageManager(pythonExe, LogMessage, logError: LogError, logWarning: LogWarning);
 
+            // 並列ダウンロードフェーズ: ffmpeg と Ollama の進捗を集約表示する
+            // （PythonPackageManager は pip install のためプログレスコールバックを持たない）
+            lock (_progressLock)
+            {
+                _activeDownloadCount = 2;
+                // Pythonフェーズの進捗をリセット（Python自体は既に完了済み）
+                _pythonProgress = 0;
+                _pythonStatus = string.Empty;
+            }
+
             await Task.WhenAll(
                 ffmpegManager.InitializeAsync(),
                 _ollamaManager.InitializeAsync(),
                 pythonPackageManager.InstallMarkItDownPackageAsync());
+
+            // 並列ダウンロード完了: 集約モードを解除
+            lock (_progressLock)
+            {
+                _activeDownloadCount = 0;
+            }
 
             var ffmpegBinPath = ffmpegManager.IsFfmpegAvailable ? ffmpegManager.FfmpegBinPath : null;
             var ollamaUrl = _ollamaManager.IsOllamaAvailable ? _ollamaManager.OllamaUrl : null;
@@ -431,20 +458,17 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="progress">進捗率（0～100）</param>
     private void UpdatePythonDownloadProgress(double progress)
     {
-        Dispatcher.UIThread.Post(() =>
+        lock (_progressLock)
         {
-            DownloadProgress = progress;
-            IsDownloading = progress > 0 && progress < 100;
-            
+            _pythonProgress = progress;
             if (progress > 0 && progress < 100)
-            {
-                UpdateProcessingStatus("Pythonダウンロード中...");
-            }
+                _pythonStatus = "Pythonダウンロード中...";
             else if (progress >= 100)
-            {
-                UpdateProcessingStatus("Python展開中...");
-            }
-        });
+                _pythonStatus = "Python展開中...";
+            else
+                _pythonStatus = string.Empty;
+        }
+        UpdateAggregatedProgress();
     }
 
     /// <summary>
@@ -453,20 +477,17 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="progress">進捗率（0～100）</param>
     private void UpdateFfmpegDownloadProgress(double progress)
     {
-        Dispatcher.UIThread.Post(() =>
+        lock (_progressLock)
         {
-            DownloadProgress = progress;
-            IsDownloading = progress > 0 && progress < 100;
-            
+            _ffmpegProgress = progress;
             if (progress > 0 && progress < 100)
-            {
-                UpdateProcessingStatus("ffmpegダウンロード中...");
-            }
+                _ffmpegStatus = "ffmpegダウンロード中...";
             else if (progress >= 100)
-            {
-                UpdateProcessingStatus("ffmpeg展開中...");
-            }
-        });
+                _ffmpegStatus = "ffmpeg展開中...";
+            else
+                _ffmpegStatus = string.Empty;
+        }
+        UpdateAggregatedProgress();
     }
 
     /// <summary>
@@ -475,11 +496,11 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="progress">進捗率（0～100）</param>
     private void UpdateOllamaDownloadProgress(double progress)
     {
-        Dispatcher.UIThread.Post(() =>
+        lock (_progressLock)
         {
-            DownloadProgress = progress;
-            IsDownloading = progress > 0 && progress < 100;
-        });
+            _ollamaProgress = progress;
+        }
+        UpdateAggregatedProgress();
     }
 
     /// <summary>
@@ -488,9 +509,58 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="status">ステータスメッセージ</param>
     private void UpdateOllamaStatus(string status)
     {
+        lock (_progressLock)
+        {
+            _ollamaStatus = status;
+        }
+        UpdateAggregatedProgress();
+    }
+
+    /// <summary>
+    /// 並列ダウンロードの個別進捗を集約し、UIプロパティに反映する。
+    /// アクティブなダウンロード（0 &lt; progress &lt; 100）の加重平均を計算する。
+    /// </summary>
+    private void UpdateAggregatedProgress()
+    {
+        double aggregated;
+        bool anyDownloading;
+        string statusMessage;
+
+        lock (_progressLock)
+        {
+            // アクティブなダウンロードのみを対象に加重平均を計算
+            // _activeDownloadCount は InitializeManagersAsync で設定される
+            var count = _activeDownloadCount;
+            if (count <= 0)
+            {
+                // 並列ダウンロード前（Pythonのみの段階）はそのまま使う
+                aggregated = _pythonProgress;
+                anyDownloading = _pythonProgress > 0 && _pythonProgress < 100;
+                statusMessage = _pythonStatus;
+            }
+            else
+            {
+                // ffmpeg と Ollama の進捗を均等に加重平均（未開始=0, 完了=100 で計算）
+                aggregated = (_ffmpegProgress + _ollamaProgress) / count;
+                anyDownloading = (_ffmpegProgress > 0 && _ffmpegProgress < 100)
+                              || (_ollamaProgress > 0 && _ollamaProgress < 100);
+
+                // ステータスメッセージ: アクティブなダウンロードの状況を結合表示
+                var parts = new List<string>(2);
+                if (!string.IsNullOrEmpty(_ffmpegStatus)) parts.Add(_ffmpegStatus.TrimEnd('.'));
+                if (!string.IsNullOrEmpty(_ollamaStatus)) parts.Add(_ollamaStatus.TrimEnd('.'));
+                statusMessage = parts.Count > 0 ? string.Join(" / ", parts) : "準備中...";
+            }
+        }
+
         Dispatcher.UIThread.Post(() =>
         {
-            ProcessingStatus = status;
+            DownloadProgress = aggregated;
+            IsDownloading = anyDownloading;
+            if (anyDownloading)
+            {
+                ProcessingStatus = statusMessage;
+            }
         });
     }
 

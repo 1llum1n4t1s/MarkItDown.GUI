@@ -45,16 +45,30 @@
           WorkingDirectory="$(MSBuildProjectDirectory)\..\icon" />
   </Target>
 
+  <!-- 7z.dll を SingleFile バンドルに含めず exe の横に外部ファイルとして残す。
+       IncludeNativeLibrariesForSelfExtract=true だと全ネイティブDLLがバンドル内に含まれるが、
+       Cube.FileSystem.SevenZip は P/Invoke の LoadLibrary で直接ロードするため
+       ファイルシステム上にファイルが必要。 -->
+  <Target Name="Exclude7zDllFromSingleFile" AfterTargets="ComputeResolvedFilesToPublishList">
+    <ItemGroup>
+      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)"
+                             Condition="'%(Filename)' == '7z' AND '%(Extension)' == '.dll'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+    <Message Text="7z.dll を SingleFile バンドルから除外したのだ" Importance="high" />
+  </Target>
+
   <!-- ビルド/パブリッシュ後に7z.dllをルートに配置 -->
   <Target Name="MoveNativeDllsToRoot" AfterTargets="Build;Publish">
     <!-- 7z.dllを複数の場所から確認して移動 -->
     <Move SourceFiles="$(OutputPath)x64\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)x64\7z.dll')" ContinueOnError="true" />
     <Move SourceFiles="$(OutputPath)runtimes\win-x64\native\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)runtimes\win-x64\native\7z.dll')" ContinueOnError="true" />
-    
+
     <!-- クリーンアップ -->
     <RemoveDir Directories="$(OutputPath)x64" Condition="Exists('$(OutputPath)x64')" ContinueOnError="true" />
     <RemoveDir Directories="$(OutputPath)x86" Condition="Exists('$(OutputPath)x86')" ContinueOnError="true" />
-    
+
     <!-- 成功したかログ出力 -->
     <Message Text="7z.dll is at: $(OutputPath)7z.dll" Importance="high" Condition="Exists('$(OutputPath)7z.dll')" />
     <Warning Text="7z.dll NOT FOUND at $(OutputPath)7z.dll" Condition="!Exists('$(OutputPath)7z.dll')" />
