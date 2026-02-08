@@ -159,6 +159,14 @@ BROWSER_ARGS = [
     "--no-default-browser-check",
     "--disable-infobars",
     "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-default-apps",
+    "--disable-hang-monitor",
+    "--disable-popup-blocking",
+    "--disable-prompt-on-repost",
+    "--metrics-recording-only",
+    "--no-service-autorun",
+    "--password-store=basic",
 ]
 
 
@@ -179,11 +187,14 @@ def _launch_persistent(playwright_module, user_data_dir: str, headless: bool):
     Cookie/セッションはプロファイルディレクトリに自動保存される。
     channel="chrome" でシステム Chrome を使い、フォールバックで Chromium を使う。
     """
+    # viewport サイズを少しランダム化（ブラウザフィンガープリント対策）
+    vp_width = 1280 + random.randint(-40, 40)
+    vp_height = 900 + random.randint(-30, 30)
     launch_kwargs = dict(
         user_data_dir=user_data_dir,
         headless=headless,
         args=BROWSER_ARGS,
-        viewport={"width": 1280, "height": 900},
+        viewport={"width": vp_width, "height": vp_height},
         locale="ja-JP",
         # user_agent は指定しない（Chrome のデフォルト UA をそのまま使う）
     )
@@ -194,14 +205,32 @@ def _launch_persistent(playwright_module, user_data_dir: str, headless: bool):
             **launch_kwargs,
         )
         log("システムの Chrome (persistent) で起動したのだ")
-        return context
     except Exception as e:
         log(f"Chrome での起動に失敗、Chromium にフォールバック: {e}")
         context = playwright_module.chromium.launch_persistent_context(
             **launch_kwargs,
         )
         log("Playwright Chromium (persistent) で起動したのだ")
-        return context
+
+    # navigator.webdriver を隠す（全ページで自動適用）
+    _stealth_script = """
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    // Chrome の plugins/languages を通常ブラウザと同等にする
+    Object.defineProperty(navigator, 'plugins', {
+        get: () => [1, 2, 3, 4, 5],
+    });
+    Object.defineProperty(navigator, 'languages', {
+        get: () => ['ja-JP', 'ja', 'en-US', 'en'],
+    });
+    // Permissions API の通知ステータスを偽装
+    const originalQuery = window.navigator.permissions.query;
+    window.navigator.permissions.query = (parameters) =>
+        parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : originalQuery(parameters);
+    """
+    context.add_init_script(_stealth_script)
+    return context
 
 
 def _is_logged_in(page) -> bool:
@@ -370,18 +399,50 @@ def _check_loading(page) -> bool:
 
 def _human_scroll(page, distance: float = 1500):
     """
-    キーボードの PageDown キーでスクロールする（BOT検知回避）。
-    JS API や mouse.wheel は CDP 経由で検知されやすいため、
-    キーボードイベントを使用する。PageDown 1回 ≒ viewport高さ分スクロール（約900px）。
+    複数のスクロール手段をランダムに組み合わせる（BOT検知回避）。
+    同一パターンの繰り返しを避けることで、自動化の指紋を残さない。
+    headed モードなので全手段が自然に動作する。
     """
-    # ページ本体にフォーカスを確保（入力欄等にフォーカスがあるとキーが効かない）
-    page.keyboard.press("Escape")
-    # distance に応じて PageDown を複数回押す（1回 ≒ 900px）
     presses = max(1, round(distance / 900))
-    for i in range(presses):
-        page.keyboard.press("PageDown")
-        if i < presses - 1:
-            time.sleep(random.uniform(0.03, 0.08))
+    # 毎回ランダムに手段を選択
+    method = random.choice(["pagedown", "space", "wheel", "arrow"])
+
+    if method == "pagedown":
+        page.keyboard.press("Escape")
+        for i in range(presses):
+            page.keyboard.press("PageDown")
+            if i < presses - 1:
+                time.sleep(random.uniform(0.02, 0.06))
+
+    elif method == "space":
+        page.keyboard.press("Escape")
+        for i in range(presses):
+            page.keyboard.press("Space")
+            if i < presses - 1:
+                time.sleep(random.uniform(0.02, 0.06))
+
+    elif method == "wheel":
+        page.mouse.move(
+            random.randint(400, 900),
+            random.randint(300, 600),
+        )
+        remaining = distance
+        while remaining > 0:
+            step = min(remaining, random.uniform(400, 800))
+            page.mouse.wheel(0, step)
+            remaining -= step
+            if remaining > 0:
+                time.sleep(random.uniform(0.01, 0.04))
+
+    elif method == "arrow":
+        # ArrowDown 連打（1回 ≒ 40px、細かいがパターンが異なる）
+        page.keyboard.press("Escape")
+        arrow_count = max(5, round(distance / 40))
+        for i in range(arrow_count):
+            page.keyboard.press("ArrowDown")
+            # 数回に1回だけ微小ウェイト
+            if i % 5 == 4:
+                time.sleep(random.uniform(0.005, 0.02))
 
 
 def _handle_interruptions(page):
