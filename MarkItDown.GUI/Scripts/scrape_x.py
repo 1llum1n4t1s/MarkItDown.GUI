@@ -366,8 +366,8 @@ def _manual_login(playwright_module, user_data_dir: str) -> tuple:
             if logged_in_el:
                 log(f"ログイン済みDOM要素を検知したのだ！ URL: {current_url}")
                 break
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"ログイン状態のDOM検出中にエラーが発生したのだ: {e}")
 
         if elapsed % 30 == 0:
             log(f"ログイン待機中... ({elapsed}秒経過, URL: {current_url})")
@@ -478,8 +478,8 @@ def _handle_interruptions(page):
             time.sleep(3)
             return
 
-    except Exception:
-        pass
+    except Exception as e:
+        log(f"割り込み要素の処理中にエラーが発生したのだ: {e}")
 
 
 def scrape_tweets(page, username: str) -> list[dict]:
@@ -511,8 +511,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
                     dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                     if oldest_ts is None or dt < oldest_ts:
                         oldest_ts = dt
-                except Exception:
-                    pass
+                except Exception as e:
+                    log(f"タイムスタンプ解析エラー (値: {ts}): {e}")
         if oldest_ts:
             # until は「その日を含まない」ので +1日
             from datetime import timedelta
@@ -599,8 +599,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
                 if tweet_els and len(tweet_els) > 0:
                     log(f"再検索後、ツイート要素を{len(tweet_els)}件検出したのだ。")
                     break
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"ツイート要素の検出中にエラーが発生したのだ: {e}")
             if wait_try < 4:
                 log(f"再検索後のツイート読み込み待機中... ({wait_try + 1}/5)")
                 _handle_interruptions(page)
@@ -903,8 +903,8 @@ def main():
         if context:
             try:
                 context.close()
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"ブラウザコンテキストのクローズ中にエラーが発生したのだ: {e}")
 
 
 if __name__ == "__main__":

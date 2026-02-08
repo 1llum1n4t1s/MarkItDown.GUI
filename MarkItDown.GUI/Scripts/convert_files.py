@@ -27,6 +27,21 @@ IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.
 def log_message(message):
     print(message, flush=True)
 
+def _write_output_file(content, base_name, suffix, timestamp, directory):
+    """ヘルパー関数: ファイルにコンテンツを書き込む。書き込んだファイル名を返す。"""
+    if not content or not content.strip():
+        log_message(f'{suffix} の内容が空のため、ファイル出力をスキップします。')
+        return None
+
+    filename = f'{base_name}_{suffix}_{timestamp}.md'
+    output_path = os.path.join(directory, filename)
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+    log_message(f'{suffix}出力完了: {output_path}')
+    return filename
+
 def create_openai_client(ollama_url):
     """OllamaのOpenAI互換クライアントを作成する。"""
     if OpenAI is None:
@@ -66,12 +81,12 @@ def create_markitdown_instance(ollama_client, ollama_model):
     return md
 
 def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_name):
-    """Ollamaを使ってMarkdownテキストを要約する。"""
+    """Ollamaを使ってMarkdownテキストを分析・統計まとめする。"""
     if not ollama_client or not ollama_model:
         return None
 
     try:
-        log_message(f'LLMでMarkdown要約開始: {file_name}')
+        log_message(f'LLMでMarkdown分析開始: {file_name}')
 
         response = ollama_client.chat.completions.create(
             model=ollama_model,
@@ -79,21 +94,25 @@ def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_
                 {
                     "role": "system",
                     "content": (
-                        "あなたは文書要約の専門家です。\n"
-                        "入力されたMarkdownテキストを簡潔に要約してください。\n\n"
-                        "【要約のルール】\n"
+                        "あなたは文書分析の専門家です。\n"
+                        "入力されたMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。\n\n"
+                        "【出力構成（この順序で出力すること）】\n"
+                        "1. 概要: 文書全体の目的・テーマを2〜3文で説明\n"
+                        "2. 統計情報: 文字数、段落数、見出し数、リンク数、画像数、表の数など該当するものを表形式で列挙\n"
+                        "3. 文書構造: 見出し階層をツリー形式で表示\n"
+                        "4. 主要トピック: 文書内の主要なトピックを箇条書きで列挙し、各トピックの要点を1〜2文で説明\n"
+                        "5. キーワード・固有名詞: 文書内で重要なキーワード、固有名詞、数値データを列挙\n"
+                        "6. 結論・要点: 文書の結論や最も重要なポイントをまとめる\n\n"
+                        "【ルール】\n"
                         "- 元のテキストの言語をそのまま使用する（日本語→日本語、英語→英語）\n"
-                        "- 文書の主要なポイント・結論・重要な情報を抽出する\n"
-                        "- 箇条書きや見出しを使って読みやすくまとめる\n"
-                        "- 表や数値データは重要なもののみ要約に含める\n"
                         "- 出力はMarkdown形式で整形する\n"
-                        "- 元の文書の10〜30%程度の分量にまとめる\n"
-                        "- 要約結果のMarkdownだけを出力する（説明文や前置きは不要）"
+                        "- 情報を省略せず、網羅的に分析する\n"
+                        "- 分析結果のMarkdownだけを出力する（説明文や前置きは不要）"
                     )
                 },
                 {
                     "role": "user",
-                    "content": f"以下のMarkdownテキストを要約してください。\n\n{raw_markdown}"
+                    "content": f"以下のMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。\n\n{raw_markdown}"
                 }
             ],
             timeout=300
@@ -101,14 +120,23 @@ def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_
 
         summary = response.choices[0].message.content
         if summary and len(summary.strip()) > 0:
-            log_message(f'LLM要約完了: {len(raw_markdown)}文字 → {len(summary)}文字')
+            summary_len = len(summary)
+            original_len = len(raw_markdown)
+            ratio = summary_len / original_len if original_len > 0 else 1.0
+            log_message(f'LLM分析完了: {original_len}文字 → {summary_len}文字 ({ratio:.0%})')
+
+            # 分析結果が元テキストの5%未満に短縮された場合は短すぎと判断して棄却
+            if original_len > 200 and ratio < 0.05:
+                log_message(f'LLM分析結果が短すぎる（{ratio:.0%}）ため、棄却します。')
+                return None
+
             return summary
         else:
-            log_message('LLM要約の結果が空でした。')
+            log_message('LLMまとめの結果が空でした。')
             return None
 
     except Exception as e:
-        log_message(f'LLM要約エラー: {e}')
+        log_message(f'LLMまとめエラー: {e}')
         return None
 
 
@@ -232,36 +260,28 @@ try:
             timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
 
             # 1. 元データ（生データ）を出力
-            origin_filename = f'{name_without_ext}_元データ_{timestamp}.md'
-            origin_path = os.path.join(file_dir, origin_filename)
-            with open(origin_path, 'w', encoding='utf-8') as f:
-                f.write(markdown_content)
-            log_message(f'元データ出力完了: {origin_path}')
+            origin_filename = _write_output_file(
+                markdown_content, name_without_ext, '元データ', timestamp, file_dir
+            )
 
-            # 2. 整形済（Ollama整形）を出力
+            # 2. 整形済・まとめ済（Ollama利用可能時のみ）
             if (markdown_content and len(markdown_content.strip()) > 0
                     and ollama_client and ollama_model):
                 formatted_content = await loop.run_in_executor(
                     None, refine_markdown_with_llm,
                     ollama_client, ollama_model, markdown_content, file_name
                 )
-                format_filename = f'{name_without_ext}_整形済_{timestamp}.md'
-                format_path = os.path.join(file_dir, format_filename)
-                with open(format_path, 'w', encoding='utf-8') as f:
-                    f.write(formatted_content)
-                log_message(f'整形済出力完了: {format_path}')
+                _write_output_file(
+                    formatted_content, name_without_ext, '整形済', timestamp, file_dir
+                )
 
-                # 3. 要約済（Ollama要約）を出力
                 summary_content = await loop.run_in_executor(
                     None, summarize_markdown_with_llm,
                     ollama_client, ollama_model, markdown_content, file_name
                 )
-                if summary_content:
-                    summary_filename = f'{name_without_ext}_要約済_{timestamp}.md'
-                    summary_path = os.path.join(file_dir, summary_filename)
-                    with open(summary_path, 'w', encoding='utf-8') as f:
-                        f.write(summary_content)
-                    log_message(f'要約済出力完了: {summary_path}')
+                _write_output_file(
+                    summary_content, name_without_ext, 'まとめ済', timestamp, file_dir
+                )
 
             log_message(f'ファイル出力完了: {file_name}')
             return f'変換完了: {file_name} → {origin_filename}'
