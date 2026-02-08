@@ -2,6 +2,9 @@
 
 シンプルなドラッグ&ドロップ操作で、様々なファイル形式をMarkdown形式に変換するWindowsアプリケーションです。WebページのスクレイピングによるJSON出力にも対応しています。
 
+<img width="689" height="539" alt="image" src="https://github.com/user-attachments/assets/65efa452-559f-44c3-ba6f-3d62255d6be2" />
+
+
 ## 特徴
 
 - **簡単操作**: ファイルやフォルダをウィンドウにドロップするだけで自動変換
