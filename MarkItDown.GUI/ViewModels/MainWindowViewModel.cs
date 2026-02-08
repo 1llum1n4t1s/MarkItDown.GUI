@@ -138,22 +138,22 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            UpdateProcessingStatus("ffmpeg環境を準備中...");
+            // ffmpeg, Ollama, パッケージインストールは互いに独立しているため並列実行
+            UpdateProcessingStatus("ffmpeg / Ollama / パッケージを並列で準備中...");
+
             var ffmpegManager = new FfmpegManager(LogMessage, UpdateFfmpegDownloadProgress, logError: LogError, logWarning: LogWarning);
-            await ffmpegManager.InitializeAsync();
-
-            UpdateProcessingStatus("Ollama環境を確認中...");
             _ollamaManager = new OllamaManager(LogMessage, UpdateOllamaDownloadProgress, UpdateOllamaStatus, logError: LogError, logWarning: LogWarning);
-            await _ollamaManager.InitializeAsync();
-
             var pythonExe = pythonEnvironmentManager.PythonExecutablePath;
+            var pythonPackageManager = new PythonPackageManager(pythonExe, LogMessage, logError: LogError, logWarning: LogWarning);
+
+            await Task.WhenAll(
+                ffmpegManager.InitializeAsync(),
+                _ollamaManager.InitializeAsync(),
+                pythonPackageManager.InstallMarkItDownPackageAsync());
+
             var ffmpegBinPath = ffmpegManager.IsFfmpegAvailable ? ffmpegManager.FfmpegBinPath : null;
             var ollamaUrl = _ollamaManager.IsOllamaAvailable ? _ollamaManager.OllamaUrl : null;
             var ollamaModel = _ollamaManager.IsOllamaAvailable ? _ollamaManager.DefaultModel : null;
-
-            UpdateProcessingStatus("Pythonパッケージを確認中...");
-            var pythonPackageManager = new PythonPackageManager(pythonExe, LogMessage, logError: LogError, logWarning: LogWarning);
-            await pythonPackageManager.InstallMarkItDownPackageAsync();
 
             UpdateProcessingStatus("MarkItDownライブラリを準備中...");
             var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, ollamaUrl, ollamaModel, logError: LogError);
@@ -253,14 +253,25 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         Dispatcher.UIThread.Post(() =>
         {
             // ログ行数上限超過時は古いログを削除
+            // Split + Join の代わりに IndexOf で N番目の改行位置を探して Substring する
             if (_logLineCount > MaxLogLines)
             {
-                var lines = LogText.Split('\n');
-                int linesToRemove = Math.Max(1, _logLineCount - MaxLogLines);
-                LogText = string.Join("\n", lines.Skip(linesToRemove));
+                var linesToRemove = _logLineCount - MaxLogLines;
+                var text = LogText;
+                var pos = 0;
+                for (var i = 0; i < linesToRemove && pos < text.Length; i++)
+                {
+                    var next = text.IndexOf('\n', pos);
+                    if (next < 0) break;
+                    pos = next + 1;
+                }
+                LogText = text[pos..] + batchContent;
                 _logLineCount = MaxLogLines;
             }
-            LogText += batchContent;
+            else
+            {
+                LogText += batchContent;
+            }
         }, DispatcherPriority.Background);
     }
 

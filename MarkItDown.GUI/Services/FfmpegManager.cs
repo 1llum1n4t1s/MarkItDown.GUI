@@ -149,12 +149,12 @@ public partial class FfmpegManager
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
                 await using var fileStream = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None);
 
-                var buffer = new byte[8192];
+                var buffer = new byte[81920]; // 80KB — ネットワークI/Oのシステムコール回数を削減
                 var totalBytesRead = 0L;
                 int bytesRead;
                 var lastReportedProgress = 0.0;
 
-                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                while ((bytesRead = await contentStream.ReadAsync(buffer)) > 0)
                 {
                     // ダウンロードサイズの追加チェック
                     totalBytesRead += bytesRead;
@@ -164,19 +164,19 @@ public partial class FfmpegManager
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
-                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
                     
                     if (totalBytes > 0)
                     {
                         var progress = (double)totalBytesRead / totalBytes * 100;
-                        
-                        if (progress - lastReportedProgress >= 0.5 || bytesRead < buffer.Length)
+
+                        if (progress - lastReportedProgress >= 0.5)
                         {
                             _progressCallback?.Invoke(progress);
                             lastReportedProgress = progress;
                         }
-                        
-                        if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
+
+                        if (totalBytesRead / (1024 * 1024) > (totalBytesRead - bytesRead) / (1024 * 1024))
                         {
                             _logMessage($"ダウンロード進捗なのだ: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
                         }
@@ -253,24 +253,47 @@ public partial class FfmpegManager
     /// </summary>
     private void EnsureSevenZipDllSearchPath()
     {
-        var baseDir = AppContext.BaseDirectory;
-        var candidatePaths = new[]
-        {
-            Path.Combine(baseDir, "7z.dll"),
-            Path.Combine(baseDir, "x64", "7z.dll"),
-            Path.Combine(baseDir, "runtimes", "win-x64", "native", "7z.dll"),
-        };
+        // Velopack 環境では実行パスが
+        //   C:\Users\<user>\AppData\Local\MarkItDown.GUI\current\MarkItDown.GUI.exe
+        // となり、AppContext.BaseDirectory は SingleFile 展開先（%TEMP%\.net\...）を
+        // 返す場合があるため、実行ファイルのディレクトリを最優先で探索する
+        var baseDirs = new System.Collections.Generic.HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var candidate in candidatePaths)
+        // 最優先: 実行ファイルの実パス（Velopack の current ディレクトリ）
+        var exePath = Environment.ProcessPath;
+        if (!string.IsNullOrEmpty(exePath))
         {
-            if (!File.Exists(candidate)) continue;
-            var dir = Path.GetDirectoryName(candidate)!;
-            _logMessage($"7z.dll 検出なのだ: {candidate}");
-            SetDllDirectory(dir);
-            return;
+            var exeDir = Path.GetDirectoryName(exePath);
+            if (!string.IsNullOrEmpty(exeDir))
+                baseDirs.Add(exeDir);
         }
 
-        _logWarning($"警告: 7z.dll が見つからないのだ（検索先: {baseDir}）");
+        baseDirs.Add(AppContext.BaseDirectory);
+        baseDirs.Add(AppDomain.CurrentDomain.BaseDirectory);
+
+        var subPaths = new[]
+        {
+            "7z.dll",
+            Path.Combine("x64", "7z.dll"),
+            Path.Combine("runtimes", "win-x64", "native", "7z.dll"),
+        };
+
+        _logMessage($"7z.dll 検索対象ディレクトリなのだ: {string.Join(", ", baseDirs)}");
+
+        foreach (var baseDir in baseDirs)
+        {
+            foreach (var sub in subPaths)
+            {
+                var candidate = Path.Combine(baseDir, sub);
+                if (!File.Exists(candidate)) continue;
+                var dir = Path.GetDirectoryName(candidate)!;
+                _logMessage($"7z.dll 検出なのだ: {candidate}");
+                SetDllDirectory(dir);
+                return;
+            }
+        }
+
+        _logWarning($"警告: 7z.dll が見つからないのだ（検索先: {string.Join(", ", baseDirs)}）");
     }
 
     /// <summary>

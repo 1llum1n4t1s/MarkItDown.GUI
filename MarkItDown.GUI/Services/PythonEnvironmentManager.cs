@@ -366,12 +366,12 @@ public partial class PythonEnvironmentManager
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
                 await using var fileStream = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None);
 
-                var buffer = new byte[8192];
+                var buffer = new byte[81920]; // 80KB — ネットワークI/Oのシステムコール回数を削減
                 var totalBytesRead = 0L;
                 int bytesRead;
                 var lastReportedProgress = 0.0;
 
-                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                while ((bytesRead = await contentStream.ReadAsync(buffer)) > 0)
                 {
                     // ダウンロードサイズの追加チェック
                     totalBytesRead += bytesRead;
@@ -381,19 +381,19 @@ public partial class PythonEnvironmentManager
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
-                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
                     
                     if (totalBytes > 0)
                     {
                         var progress = (double)totalBytesRead / totalBytes * 100;
-                        
-                        if (progress - lastReportedProgress >= 0.5 || bytesRead < buffer.Length)
+
+                        if (progress - lastReportedProgress >= 0.5)
                         {
                             _progressCallback?.Invoke(progress);
                             lastReportedProgress = progress;
                         }
-                        
-                        if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
+
+                        if (totalBytesRead / (1024 * 1024) > (totalBytesRead - bytesRead) / (1024 * 1024))
                         {
                             _logMessage($"ダウンロード進捗なのだ: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
                         }

@@ -5,6 +5,7 @@ using System.IO.Compression;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -28,11 +29,16 @@ public class OllamaManager : IDisposable
     private string _ollamaExePath = string.Empty;
     private bool _isExtracting;
     private bool _disposed;
+    private string? _cachedTagsJson; // CheckOllamaAvailabilityAsync の成功レスポンスをキャッシュ
 
     private static readonly HttpClient HttpClientForDownload = new()
     {
         Timeout = TimeSpan.FromMinutes(10)
     };
+
+    // ollama pull の進捗パース用（毎行の Regex.Match をプリコンパイルで高速化）
+    private static readonly Regex PercentRegex = new(@"(\d+)%", RegexOptions.Compiled);
+    private static readonly Regex SizeRegex = new(@"([\d.]+\s*[KMGT]?B)\s*/\s*([\d.]+\s*[KMGT]?B)", RegexOptions.Compiled);
 
     /// <summary>
     /// Ollamaが利用可能かどうか
@@ -129,9 +135,21 @@ public class OllamaManager : IDisposable
                 _statusCallback?.Invoke("Ollamaサーバーを起動中...");
                 _logMessage("Ollamaサーバーを起動するのだ...");
                 await StartOllamaServerAsync();
-                _statusCallback?.Invoke("Ollamaサーバーの応答を待機中...");
-                await Task.Delay(5000);
-                _isAvailable = await CheckOllamaAvailabilityAsync();
+
+                // GPU（CUDA）初期化に時間がかかる場合があるため、
+                // リトライ付きポーリングで接続を確認する（最大90秒）
+                const int maxRetries = 6;
+                const int retryDelayMs = 15_000; // 15秒間隔
+                for (var retry = 0; retry < maxRetries; retry++)
+                {
+                    var waitSec = (retry == 0) ? 10 : retryDelayMs / 1000;
+                    _statusCallback?.Invoke($"Ollamaサーバーの応答を待機中...（{retry + 1}/{maxRetries}）");
+                    _logMessage($"Ollamaサーバー応答待機中なのだ（試行 {retry + 1}/{maxRetries}、{waitSec}秒待機）...");
+                    await Task.Delay(retry == 0 ? 10_000 : retryDelayMs);
+                    _isAvailable = await CheckOllamaAvailabilityAsync();
+                    if (_isAvailable) break;
+                    _logMessage($"Ollamaサーバーがまだ応答しないのだ（試行 {retry + 1}/{maxRetries}）");
+                }
             }
 
             if (_isAvailable)
@@ -160,7 +178,8 @@ public class OllamaManager : IDisposable
     }
 
     /// <summary>
-    /// Ollamaが利用可能かチェックする
+    /// Ollamaが利用可能かチェックする。
+    /// 成功時はレスポンスをキャッシュし、直後の CheckModelAvailabilityAsync で再利用する。
     /// </summary>
     private async Task<bool> CheckOllamaAvailabilityAsync()
     {
@@ -168,10 +187,12 @@ public class OllamaManager : IDisposable
         {
             _logMessage("Ollamaの接続テストを実行中なのだ...");
             var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
-            
+
             if (response.IsSuccessStatusCode)
             {
                 _logMessage("Ollamaへの接続に成功したのだ。");
+                // 後続の CheckModelAvailabilityAsync で再利用するためキャッシュ
+                _cachedTagsJson = await response.Content.ReadAsStringAsync();
                 return true;
             }
             else
@@ -193,23 +214,35 @@ public class OllamaManager : IDisposable
     }
 
     /// <summary>
-    /// 指定されたモデルが利用可能かチェックする
+    /// 指定されたモデルが利用可能かチェックする。
+    /// CheckOllamaAvailabilityAsync でキャッシュ済みのレスポンスがあれば再利用し、
+    /// /api/tags への二重リクエストを回避する。
     /// </summary>
     private async Task<bool> CheckModelAvailabilityAsync(string modelName)
     {
         try
         {
             _logMessage($"モデル '{modelName}' の可用性を確認中なのだ...");
-            var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
-            
-            if (!response.IsSuccessStatusCode)
+
+            // キャッシュ済みレスポンスがあれば再利用（API呼び出しを1回削減）
+            string content;
+            if (_cachedTagsJson is not null)
             {
-                return false;
+                content = _cachedTagsJson;
+                _cachedTagsJson = null; // 1回限りのキャッシュ
+            }
+            else
+            {
+                var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
+                if (!response.IsSuccessStatusCode)
+                {
+                    return false;
+                }
+                content = await response.Content.ReadAsStringAsync();
             }
 
-            var content = await response.Content.ReadAsStringAsync();
-            var jsonDoc = JsonDocument.Parse(content);
-            
+            using var jsonDoc = JsonDocument.Parse(content);
+
             if (jsonDoc.RootElement.TryGetProperty("models", out var models))
             {
                 foreach (var model in models.EnumerateArray())
@@ -333,12 +366,12 @@ public class OllamaManager : IDisposable
                 await using var contentStream = await response.Content.ReadAsStreamAsync();
                 await using var fileStream = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None);
 
-                var buffer = new byte[8192];
+                var buffer = new byte[81920]; // 80KB — ネットワークI/Oのシステムコール回数を削減
                 var totalBytesRead = 0L;
                 int bytesRead;
                 var lastReportedProgress = 0.0;
 
-                while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
+                while ((bytesRead = await contentStream.ReadAsync(buffer)) > 0)
                 {
                     // ダウンロードサイズの追加チェック
                     totalBytesRead += bytesRead;
@@ -348,19 +381,19 @@ public class OllamaManager : IDisposable
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
-                    await fileStream.WriteAsync(buffer, 0, bytesRead);
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
                     
                     if (totalBytes > 0)
                     {
                         var progress = (double)totalBytesRead / totalBytes * 100;
-                        
-                        if (progress - lastReportedProgress >= 0.5 || bytesRead < buffer.Length)
+
+                        if (progress - lastReportedProgress >= 0.5)
                         {
                             _progressCallback?.Invoke(progress);
                             lastReportedProgress = progress;
                         }
-                        
-                        if (totalBytesRead % (1024 * 1024) == 0 || bytesRead < buffer.Length)
+
+                        if (totalBytesRead / (1024 * 1024) > (totalBytesRead - bytesRead) / (1024 * 1024))
                         {
                             _logMessage($"ダウンロード進捗なのだ: {progress:F1}% ({totalBytesRead / 1024 / 1024:F2} MB / {totalBytes / 1024 / 1024:F2} MB)");
                         }
@@ -603,14 +636,13 @@ public class OllamaManager : IDisposable
                     var line = e.Data;
 
                     // 進捗パーセントをパース（例: "45%" や "pulling abc123... 45%"）
-                    var percentMatch = System.Text.RegularExpressions.Regex.Match(line, @"(\d+)%");
+                    var percentMatch = PercentRegex.Match(line);
                     if (percentMatch.Success && int.TryParse(percentMatch.Groups[1].Value, out var percent))
                     {
                         _progressCallback?.Invoke(percent);
 
                         // ステータスにサイズ情報を含める（例: "1.5 GB/3.3 GB"）
-                        var sizeMatch = System.Text.RegularExpressions.Regex.Match(
-                            line, @"([\d.]+\s*[KMGT]?B)\s*/\s*([\d.]+\s*[KMGT]?B)");
+                        var sizeMatch = SizeRegex.Match(line);
                         if (sizeMatch.Success)
                         {
                             _statusCallback?.Invoke(
