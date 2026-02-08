@@ -269,9 +269,9 @@ def ensure_login(playwright_module, session_path: str) -> tuple:
     """
     user_data_dir = _get_user_data_dir(session_path)
 
-    # まず headless で既存プロファイルのセッションを確認
-    log("保存済みプロファイルでセッション確認中なのだ...")
-    context = _launch_persistent(playwright_module, user_data_dir, headless=True)
+    # headed（画面表示）でセッション確認（BOT検知回避のため常に headed）
+    log("保存済みプロファイルでセッション確認中なのだ（headedモード）...")
+    context = _launch_persistent(playwright_module, user_data_dir, headless=False)
     page = context.pages[0] if context.pages else context.new_page()
     page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=30000)
     time.sleep(5)  # X.comの初期ロードに十分な時間を確保
@@ -280,8 +280,8 @@ def ensure_login(playwright_module, session_path: str) -> tuple:
         log("セッション復元に成功したのだ！")
         return context, page
 
-    # 未ログイン → headless を閉じて headed で手動ログイン
-    log("未ログイン状態なのだ。ブラウザを表示してログインを待つのだ...")
+    # 未ログイン → そのまま headed で手動ログイン待ち
+    log("未ログイン状態なのだ。ブラウザでログインしてください...")
     context.close()
 
     return _manual_login(playwright_module, user_data_dir)
@@ -350,13 +350,7 @@ def _manual_login(playwright_module, user_data_dir: str) -> tuple:
 
     log("ログイン成功！セッションはプロファイルに自動保存されるのだ。")
 
-    # headed ブラウザを閉じて headless で再起動（スクレイピング用）
-    context.close()
-    log("ヘッドレスモードで再起動するのだ...")
-
-    context = _launch_persistent(playwright_module, user_data_dir, headless=True)
-    page = context.pages[0] if context.pages else context.new_page()
-
+    # そのまま headed で続行（BOT検知回避のため headless に切り替えない）
     return context, page
 
 
