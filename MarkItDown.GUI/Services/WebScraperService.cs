@@ -727,6 +727,38 @@ public sealed class WebScraperService : IDisposable
         return username;
     }
 
+    /// <summary>
+    /// X/TwitterのユーザーページURLであればユーザー名を取得する
+    /// </summary>
+    public static bool TryExtractXTwitterUsername(string url, out string username)
+    {
+        username = string.Empty;
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!IsXTwitterUserUrl(uri))
+        {
+            return false;
+        }
+
+        var path = uri.AbsolutePath.Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        username = path.Split('/')[0];
+        if (username.Contains('?'))
+        {
+            username = username.Split('?')[0];
+        }
+
+        return !string.IsNullOrWhiteSpace(username);
+    }
+
     // ────────────────────────────────────────────
     //  URL正規化
     // ────────────────────────────────────────────
