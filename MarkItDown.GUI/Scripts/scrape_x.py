@@ -374,6 +374,26 @@ def _check_loading(page) -> bool:
         return False
 
 
+def _human_scroll(page, distance: float = 1500):
+    """
+    マウスホイールイベントでスクロールする（BOT検知回避）。
+    window.scrollBy 等の JS API を使わず、ネイティブのホイールイベントを発火する。
+    distance は合計のスクロール量（px）。複数回に分けてスクロールする。
+    速度重視: ステップ間の遅延を最小限に抑える。
+    """
+    # ページ中央付近にマウスを移動（ホイールイベントの発火元）
+    page.mouse.move(640, 450)
+    # 2〜3回に分割してスクロール（高速だがネイティブイベント）
+    remaining = distance
+    while remaining > 0:
+        # 1回あたり500〜1000pxの大きめホイールイベント
+        step = min(remaining, random.uniform(500, 1000))
+        page.mouse.wheel(0, step)
+        remaining -= step
+        if remaining > 0:
+            time.sleep(random.uniform(0.01, 0.03))
+
+
 def _handle_interruptions(page):
     """
     スクロール中に発生する各種ボタンを検出して対処する。
@@ -508,7 +528,7 @@ def scrape_tweets(page, username: str) -> list[dict]:
                 log(f"  → {detour_url}")
                 page.goto(detour_url, wait_until="domcontentloaded", timeout=30000)
                 time.sleep(random.uniform(2, 4))
-                page.evaluate("window.scrollBy(0, window.innerHeight * 1.5)")
+                _human_scroll(page, random.uniform(800, 1500))
                 time.sleep(random.uniform(1, 3))
             except Exception as e:
                 log(f"  迂回ページ遷移エラー（無視して続行）: {e}")
@@ -572,12 +592,11 @@ def scrape_tweets(page, username: str) -> list[dict]:
             log(f"--- {len(tweets)} 件のツイートを取得済み ---")
             last_save_count = len(tweets)
 
-        # スクロール（人間的なランダム量でBOT検知を回避）
-        scroll_amount = random.uniform(2.0, 3.5)
-        page.evaluate(f"window.scrollBy(0, window.innerHeight * {scroll_amount})")
+        # スクロール（マウスホイールでBOT検知を回避）
+        _human_scroll(page, random.uniform(1500, 2500))
 
-        # 人間的なランダム待機時間
-        time.sleep(random.uniform(1.0, 2.0))
+        # コンテンツ読み込み待機（短め）
+        time.sleep(random.uniform(0.5, 1.0))
 
         # ボタン対処（再試行/もっと見る等）
         _handle_interruptions(page)
