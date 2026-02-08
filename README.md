@@ -10,7 +10,7 @@
   - Reddit: JSON API による高速取得
   - その他のサイト: Playwright + Ollamaガイド型で動的コンテンツ（ページネーション・無限スクロール等）にも対応
 - **自動環境構築**: Python環境、FFmpeg、Ollamaを初回起動時に自動でダウンロード・セットアップ
-- **Ollama連携**: ローカルLLM (Ollama) を使用した画像説明の自動生成に対応
+- **Ollama連携 (gemma3:4b)**: ローカルLLM を使用した画像説明の自動生成、Markdown整形、スクレイピング戦略分析を統合
 - **LLMによる自動整形**: 全ファイル形式の変換結果をOllamaで自動的に整形（元データを損失しない軽量プロンプト）
 - **並列処理**: 最大3ファイルの同時変換で高速処理
 - **重複処理の回避**: 同じファイルの再処理をキャッシュでスキップ
@@ -84,15 +84,18 @@ Playwright（ヘッドレスブラウザ）とOllama（ローカルLLM）を組�
 - 無限スクロール
 - Cookie同意バナーの自動処理
 
-OllamaのOpenAI互換チャットAPI（`/v1/chat/completions`）を使用して、ページの構造を分析し最適なスクレイピング戦略を決定します。
+OllamaのOpenAI互換チャットAPI（`/v1/chat/completions`）を使用して、ページの構造を分析し最適なスクレイピング戦略を決定します。マルチモーダルモデル（gemma3）を使用している場合、ページのスクリーンショットも分析に活用されます。
 
 ## Ollama連携機能（自動セットアップ）
 
-Ollamaを使用して、以下のLLM連携機能を提供します。
+Ollamaと **gemma3:4b**（Google製マルチモーダルモデル）を使用して、以下のLLM連携機能を提供します。
 
-- **画像説明の自動生成**: 画像ファイルをドロップすると、MarkItDownのネイティブLLM統合により画像の説明文を自動生成します
+- **画像説明の自動生成**: 画像ファイルをドロップすると、MarkItDownのネイティブLLM統合により画像の説明文を日本語で自動生成します
 - **Markdown整形**: 全ファイル形式の変換結果を、Ollamaで自動的にきれいなMarkdown形式に整形します（元データを損失しない軽量プロンプト）
+- **スクレイピング戦略分析**: Webスクレイピング時にページ構造（DOM統計、HTMLサンプル、スクリーンショット）を分析し、最適なCSSセレクタと抽出戦略を動的に決定します
 - **スクレイピングJSON整形**: Webスクレイピング結果のJSONを構造化・整形します（大きなJSONはチャンク分割で処理）
+
+> **使用モデル**: `gemma3:4b` はアプリ内部で固定されており、設定変更は不要です。テキストと画像の両方を理解できるマルチモーダルモデルで、約3.3GBのディスク容量を使用します。
 
 ### 自動セットアップ
 
@@ -107,9 +110,9 @@ Ollamaを使用して、以下のLLM連携機能を提供します。
    - ダウンロード完了後、バックグラウンドでOllamaサーバーを起動します
    - `http://localhost:11434` で待機します
 
-3. **ビジョンモデルの自動ダウンロード**
-   - `llava` モデルが存在しない場合、自動的にダウンロードを開始します
-   - 初回は数GB（モデルサイズ）のダウンロードが発生します
+3. **gemma3:4bモデルの自動ダウンロード**
+   - `gemma3:4b` モデルが存在しない場合、自動的にダウンロードを開始します
+   - 初回は約3.3GBのダウンロードが発生します
    - ダウンロード中もログに進捗が表示されます
 
 4. **完了**
@@ -124,10 +127,14 @@ Ollamaを使用して、以下のLLM連携機能を提供します。
 ```xml
 <AppSettings>
   <OllamaUrl>http://localhost:11434</OllamaUrl>
-  <OllamaModel>llava:34b</OllamaModel>
   <OllamaGpuDevice>0</OllamaGpuDevice>
 </AppSettings>
 ```
+
+| 設定項目 | 説明 | デフォルト値 |
+|---|---|---|
+| `OllamaUrl` | OllamaサーバーのエンドポイントURL | `http://localhost:11434` |
+| `OllamaGpuDevice` | 使用するGPUデバイスID | `0`（自動検出） |
 
 #### GPU設定（OllamaGpuDevice）
 
@@ -143,19 +150,13 @@ Ollamaを使用して、以下のLLM連携機能を提供します。
 **GPU IDの確認方法:**
 コマンドプロンプトで `nvidia-smi -L` を実行すると、利用可能なGPUのリストが表示されます。
 
-### 使用可能なモデル
-
-- `llava`: 汎用的な画像理解モデル（推奨）
-- `llava:13b`: より高精度な大型モデル
-- `llava:34b`: 最高精度の大型モデル（高性能PC推奨）
-
 ### 注意事項
 
-- **初回起動時の所要時間**: Ollamaとllavaモデルのダウンロードに10～30分程度かかる場合があります（ネットワーク速度に依存）
-- **ディスク容量**: Ollama本体（約200MB）+ llavaモデル（約4.5GB）が必要です
+- **初回起動時の所要時間**: Ollamaとgemma3:4bモデルのダウンロードに10～30分程度かかる場合があります（ネットワーク速度に依存）
+- **ディスク容量**: Ollama本体（約200MB）+ gemma3:4bモデル（約3.3GB）が必要です
 - **メモリ要件**: モデル実行時に8GB以上のRAMを推奨します
 - Ollamaのダウンロードに失敗した場合でも、画像ファイルの基本情報（ファイル名、サイズなど）は出力されます
-- 画像説明の生成には数秒～数十秒かかる場合があります
+- 画像説明の生成には数秒～数十秒かかる場合があります（初回のモデルロード時はさらに時間がかかります）
 
 ## 自動環境構築
 
@@ -163,16 +164,18 @@ Ollamaを使用して、以下のLLM連携機能を提供します。
 
 | コンポーネント | 用途 | 配置先 |
 |---|---|---|
-| 埋め込みPython | MarkItDownライブラリの実行環境 | `lib/python/python-embed/` |
+| 埋め込みPython 3.10+ | MarkItDownライブラリの実行環境 | `lib/python/python-embed/` |
 | FFmpeg | 音声ファイルの処理 | `lib/ffmpeg/` |
-| Ollama | 画像説明生成・Markdown整形・スクレイピング | `lib/ollama/` |
-| markitdown[all] | ファイル変換ライブラリ（pip自動インストール・更新） | Python site-packages |
+| Ollama | LLM推論エンジン（gemma3:4b） | `lib/ollama/` |
+| markitdown（最新版） | ファイル変換ライブラリ（pip自動インストール・更新） | Python site-packages |
 | openai | OllamaのOpenAI互換API利用（pip自動インストール・更新） | Python site-packages |
 | playwright | Webスクレイピング用ブラウザ自動化（pip自動インストール・更新） | Python site-packages |
 
 Python環境は公式の埋め込み版を使用し、システムのPython環境には影響しません。
 
 起動時にこれらのPythonパッケージの最新バージョンが自動的に確認・更新されます。
+
+> **技術的補足**: markitdown 0.1.x は `onnxruntime<=1.20.1` を要求しますが、Python 3.14 では onnxruntime 1.24.1+ しか利用できないため、依存パッケージを先にインストールした後、markitdown本体を `--no-deps` オプションでインストールしています。実際にはonnxruntime 1.24.1でも正常に動作します。
 
 ## 動作環境
 
@@ -185,7 +188,8 @@ Python環境は公式の埋め込み版を使用し、システムのPython環�
 - **言語**: C# 14 / Python 3.10+
 - **アーキテクチャ**: MVVM (Model-View-ViewModel)
 - **ファイル変換**: Microsoft MarkItDown（Python）
-- **Webスクレイピング**: Playwright（ヘッドレスブラウザ）+ Ollama（構造分析）
+- **LLMモデル**: gemma3:4b（Google製マルチモーダルモデル、アプリ内部固定）
+- **Webスクレイピング**: Playwright（ヘッドレスブラウザ）+ Ollama（構造分析・スクリーンショット解析）
 - **LLM連携**: Ollama OpenAI互換API (`/v1/chat/completions`)
 - **自動更新**: Velopack
 - **ログ**: ZLogger（ローリングファイル出力）
