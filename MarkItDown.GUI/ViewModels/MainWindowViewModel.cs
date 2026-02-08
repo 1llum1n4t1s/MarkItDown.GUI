@@ -348,6 +348,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
             await _webScraperService.ScrapeAsync(url, outputPath);
             LogMessage($"抽出完了: {outputPath}");
+            UrlInput = string.Empty;
         }
         catch (HttpRequestException ex)
         {

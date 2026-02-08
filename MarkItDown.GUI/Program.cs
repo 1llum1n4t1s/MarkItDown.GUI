@@ -1,4 +1,5 @@
 using System;
+using System.Threading;
 using Avalonia;
 using MarkItDown.GUI.Services;
 using Velopack;
@@ -10,10 +11,23 @@ namespace MarkItDown.GUI;
 /// </summary>
 internal static class Program
 {
+    /// <summary>
+    /// 多重起動防止用 Mutex 名
+    /// </summary>
+    private const string MutexName = "Global\\MarkItDown.GUI.SingleInstance";
+
     [STAThread]
     public static int Main(string[] args)
     {
         VelopackApp.Build().Run();
+
+        using var mutex = new Mutex(true, MutexName, out var createdNew);
+        if (!createdNew)
+        {
+            // 既にアプリケーションが起動している
+            return 0;
+        }
+
         Logger.Initialize();
         Logger.LogStartup(args);
         Logger.Log("アプリケーション起動", LogLevel.Info);
