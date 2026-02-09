@@ -40,7 +40,7 @@ public class MarkItDownProcessor
     /// Check MarkItDown library availability
     /// </summary>
     /// <returns>True if library is available</returns>
-    public bool CheckMarkItDownAvailability()
+    public async Task<bool> CheckMarkItDownAvailabilityAsync()
     {
         try
         {
@@ -58,18 +58,10 @@ public class MarkItDownProcessor
             {
                 File.WriteAllText(scriptPath, checkScript, Encoding.UTF8);
                 _logMessage("チェックスクリプト作成完了なのだ");
-                    
-                var startInfo = new ProcessStartInfo
-                {
-                    FileName = _pythonExecutablePath,
-                    WorkingDirectory = appDir,
-                    UseShellExecute = false,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    CreateNoWindow = true,
-                    StandardOutputEncoding = Encoding.UTF8,
-                    StandardErrorEncoding = Encoding.UTF8
-                };
+
+                // ProcessUtils経由でProcessStartInfoを作成
+                var startInfo = ProcessUtils.CreatePythonProcessInfo(_pythonExecutablePath, scriptPath);
+                startInfo.WorkingDirectory = appDir;
 
                 if (!string.IsNullOrEmpty(_ffmpegBinPath))
                 {
@@ -78,60 +70,35 @@ public class MarkItDownProcessor
                     _logMessage($"ffmpeg PATH設定なのだ: {_ffmpegBinPath}");
                 }
 
-                // Use argument list for secure command execution (prevents command injection)
-                startInfo.ArgumentList.Add(scriptPath);
+                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                var (exitCode, output, error) = await ProcessUtils.RunAsync(
+                    startInfo, TimeoutSettings.MarkItDownCheckTimeoutMs);
+                stopwatch.Stop();
 
-                _logMessage($"Python実行パス: {_pythonExecutablePath}");
-                _logMessage($"Python引数: {startInfo.Arguments}");
-                _logMessage($"作業ディレクトリ: {startInfo.WorkingDirectory}");
+                _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
 
-                using var process = Process.Start(startInfo);
-                if (process != null)
+                if (!string.IsNullOrEmpty(output))
                 {
-                    var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+                    _logMessage($"Python出力:\n{output}");
+                }
+                if (!string.IsNullOrEmpty(error))
+                {
+                    _logError($"Pythonエラー:\n{error}");
+                }
 
-                    // ReadToEnd を WaitForExit より先に呼ぶ（逆にするとバッファ満杯時にデッドロックする）
-                    var output = process.StandardOutput.ReadToEnd();
-                    var error = process.StandardError.ReadToEnd();
-
-                    var exited = process.WaitForExit(TimeoutSettings.MarkItDownCheckTimeoutMs);
-                    stopwatch.Stop();
-
-                    _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
-
-                    if (!exited)
-                    {
-                        _logMessage("MarkItDownライブラリチェックがタイムアウトしたのだ。プロセスを強制終了するのだ。");
-                        try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
-                        return false;
-                    }
-
-                    if (!string.IsNullOrEmpty(output))
-                    {
-                        _logMessage($"Python出力:\n{output}");
-                    }
-                    if (!string.IsNullOrEmpty(error))
-                    {
-                        _logError($"Pythonエラー:\n{error}");
-                    }
-
-                    if (process.ExitCode == 0)
-                    {
-                        _logMessage("MarkItDownライブラリチェック完了なのだ - 利用可能なのだ");
-                        return true;
-                    }
-                    else
-                    {
-                        _logError($"MarkItDownライブラリチェック失敗なのだ - 終了コード: {process.ExitCode}");
-                        return false;
-                    }
+                if (exitCode == 0)
+                {
+                    _logMessage("MarkItDownライブラリチェック完了なのだ - 利用可能なのだ");
+                    return true;
+                }
+                else if (exitCode == -1)
+                {
+                    _logMessage("MarkItDownライブラリチェックがタイムアウトまたはキャンセルされたのだ。");
+                    return false;
                 }
                 else
                 {
-                    _logError("Pythonプロセスの開始に失敗したのだ");
-                    _logMessage($"Python実行パス: {_pythonExecutablePath}");
-                    _logMessage($"スクリプトパス: {scriptPath}");
-                    _logMessage($"スクリプトファイル存在: {File.Exists(scriptPath)}");
+                    _logError($"MarkItDownライブラリチェック失敗なのだ - 終了コード: {exitCode}");
                     return false;
                 }
             }
@@ -162,9 +129,9 @@ public class MarkItDownProcessor
     /// Execute Python script for MarkItDown conversion
     /// </summary>
     /// <param name="appDir">Application directory</param>
-    /// <param name="filePathsJson">JSON string of file paths</param>
-    /// <param name="folderPathsJson">JSON string of folder paths</param>
-    public void ExecuteMarkItDownConvertScript(string appDir, string filePathsJson, string folderPathsJson)
+    /// <param name="filePathsJson">JSON file path containing file paths</param>
+    /// <param name="folderPathsJson">JSON file path containing folder paths</param>
+    public async Task ExecuteMarkItDownConvertScriptAsync(string appDir, string filePathsJson, string folderPathsJson)
     {
         try
         {
@@ -180,18 +147,9 @@ public class MarkItDownProcessor
             _logMessage($"スクリプトパス: {scriptPath}");
             _logMessage($"ファイルパスJSON: {filePathsJson}");
             _logMessage($"フォルダパスJSON: {folderPathsJson}");
-                
-            var startInfo = new ProcessStartInfo
-            {
-                FileName = _pythonExecutablePath,
-                WorkingDirectory = appDir,
-                UseShellExecute = false,
-                RedirectStandardOutput = true,
-                RedirectStandardError = true,
-                CreateNoWindow = true,
-                StandardOutputEncoding = Encoding.UTF8,
-                StandardErrorEncoding = Encoding.UTF8
-            };
+
+            var startInfo = ProcessUtils.CreatePythonProcessInfo(_pythonExecutablePath, scriptPath, filePathsJson, folderPathsJson);
+            startInfo.WorkingDirectory = appDir;
 
             if (!string.IsNullOrEmpty(_ffmpegBinPath))
             {
@@ -211,51 +169,49 @@ public class MarkItDownProcessor
                 _logMessage($"Ollama Model設定: {_ollamaModel}");
             }
 
-            // Use argument list for secure command execution (prevents command injection)
-            startInfo.ArgumentList.Add(scriptPath);
-            startInfo.ArgumentList.Add(filePathsJson);
-            startInfo.ArgumentList.Add(folderPathsJson);
-
             using var process = Process.Start(startInfo);
-            if (process != null)
+            if (process is null)
             {
-                process.OutputDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrEmpty(e.Data))
-                    {
-                        _logMessage(e.Data);
-                    }
-                };
-                process.ErrorDataReceived += (_, e) =>
-                {
-                    if (!string.IsNullOrEmpty(e.Data))
-                    {
-                        _logMessage(e.Data);
-                    }
-                };
-                
-                process.BeginOutputReadLine();
-                process.BeginErrorReadLine();
+                _logError("Pythonプロセスの開始に失敗したのだ");
+                return;
+            }
 
-                var stopwatch = System.Diagnostics.Stopwatch.StartNew();
-                var exited = process.WaitForExit(TimeoutSettings.FileConversionTimeoutMs);
+            process.OutputDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrEmpty(e.Data))
+                {
+                    _logMessage(e.Data);
+                }
+            };
+            process.ErrorDataReceived += (_, e) =>
+            {
+                if (!string.IsNullOrEmpty(e.Data))
+                {
+                    _logMessage(e.Data);
+                }
+            };
+
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            using var cts = new System.Threading.CancellationTokenSource(TimeoutSettings.FileConversionTimeoutMs);
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
                 stopwatch.Stop();
-
                 _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
-
-                if (!exited)
+                _logMessage($"Pythonスクリプト実行完了なのだ - 終了コード: {process.ExitCode}");
+            }
+            catch (OperationCanceledException)
+            {
+                stopwatch.Stop();
+                _logMessage($"Process execution time before timeout: {stopwatch.ElapsedMilliseconds}ms");
+                if (!process.HasExited)
                 {
                     _logMessage("ファイル変換がタイムアウトしたのだ。プロセスを強制終了するのだ。");
                     try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
                 }
-                else
-                {
-                    _logMessage($"Pythonスクリプト実行完了なのだ - 終了コード: {process.ExitCode}");
-                }
-            }
-            else
-            {
-                _logError("Pythonプロセスの開始に失敗したのだ");
             }
         }
         catch (Exception ex)

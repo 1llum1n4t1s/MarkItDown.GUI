@@ -122,7 +122,7 @@ public class FileProcessor
         {
             // MarkItDownライブラリの利用可能性を事前にチェック
             _logMessage("MarkItDownライブラリの利用可能性をチェック中なのだ...");
-            if (!_markItDownProcessor.CheckMarkItDownAvailability())
+            if (!await _markItDownProcessor.CheckMarkItDownAvailabilityAsync())
             {
                 _logMessage("MarkItDownライブラリが利用できなかったのだ。処理を中止するのだ。");
                 return;
@@ -228,7 +228,7 @@ public class FileProcessor
             File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);
 
             // Pythonスクリプトを実行
-            await Task.Run(() => _markItDownProcessor.ExecuteMarkItDownConvertScript(appDir, tempFilePathsJson, tempFolderPathsJson));
+            await _markItDownProcessor.ExecuteMarkItDownConvertScriptAsync(appDir, tempFilePathsJson, tempFolderPathsJson);
             _logMessage($"ファイル処理完了なのだ: {filePath}");
         }
         catch (Exception ex)
@@ -274,7 +274,7 @@ public class FileProcessor
             File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);
 
             // Pythonスクリプトを実行
-            await Task.Run(() => _markItDownProcessor.ExecuteMarkItDownConvertScript(appDir, tempFilePathsJson, tempFolderPathsJson));
+            await _markItDownProcessor.ExecuteMarkItDownConvertScriptAsync(appDir, tempFilePathsJson, tempFolderPathsJson);
             _logMessage($"フォルダ処理完了なのだ: {folderPath}");
         }
         catch (Exception ex)

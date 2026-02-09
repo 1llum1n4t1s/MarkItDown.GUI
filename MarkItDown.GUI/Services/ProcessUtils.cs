@@ -60,7 +60,7 @@ public static class ProcessUtils
     /// <summary>
     /// コマンドが PATH 上に存在するかチェックする
     /// </summary>
-    public static bool TryCheckCommandVersion(string command, int timeoutMs, Action<string> logMessage)
+    public static async Task<bool> TryCheckCommandVersionAsync(string command, int timeoutMs, Action<string> logMessage)
     {
         try
         {
@@ -84,8 +84,20 @@ public static class ProcessUtils
                 return false;
             }
 
-            var exited = process.WaitForExit(timeoutMs);
-            return exited && process.ExitCode == 0;
+            using var cts = new CancellationTokenSource(timeoutMs);
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+                return process.ExitCode == 0;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!process.HasExited)
+                {
+                    try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
+                }
+                return false;
+            }
         }
         catch (Exception ex)
         {

@@ -23,6 +23,10 @@ SUPPORTED_EXTENSIONS = {
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'}
 
+# LLM分析・整形時の閾値定数
+MIN_LEN_FOR_SUMMARY_CHECK = 200  # 要約結果の長さチェックを行う最小の元テキスト長
+MIN_SUMMARY_RATIO = 0.05  # 要約結果が元テキストの何%未満なら棄却するか
+
 
 def log_message(message):
     print(message, flush=True)
@@ -126,7 +130,7 @@ def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_
             log_message(f'LLM分析完了: {original_len}文字 → {summary_len}文字 ({ratio:.0%})')
 
             # 分析結果が元テキストの5%未満に短縮された場合は短すぎと判断して棄却
-            if original_len > 200 and ratio < 0.05:
+            if original_len > MIN_LEN_FOR_SUMMARY_CHECK and ratio < MIN_SUMMARY_RATIO:
                 log_message(f'LLM分析結果が短すぎる（{ratio:.0%}）ため、棄却します。')
                 return None
 
@@ -237,8 +241,6 @@ try:
             # 変換結果が空の場合、ファイル情報を追加
             if not markdown_content or len(markdown_content.strip()) == 0:
                 log_message(f'警告: 変換結果が空です。ファイル情報を追加します。')
-
-                file_ext = os.path.splitext(file_path)[1].lower()
 
                 if file_ext in IMAGE_EXTENSIONS:
                     file_size = os.path.getsize(file_path)

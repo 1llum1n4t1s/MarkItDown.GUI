@@ -28,6 +28,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse, parse_qs, urlencode
 
+# リトライ回数の定数
+MAX_RELOAD_ATTEMPTS = 5  # 再検索後のツイート要素検出の最大リトライ回数
+
 def log(msg: str):
     """タイムスタンプ付きログ出力（C#側でアイドルタイムアウトをリセットする）"""
     print(f"[X.com] {msg}", flush=True)
@@ -593,7 +596,7 @@ def scrape_tweets(page, username: str) -> list[dict]:
         page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
         time.sleep(random.uniform(4, 7))
         # 検索結果が読み込まれるまでリトライ（最大5回）
-        for wait_try in range(5):
+        for wait_try in range(MAX_RELOAD_ATTEMPTS):
             try:
                 tweet_els = page.query_selector_all('article[data-testid="tweet"]')
                 if tweet_els and len(tweet_els) > 0:
@@ -601,8 +604,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
                     break
             except Exception as e:
                 log(f"ツイート要素の検出中にエラーが発生したのだ: {e}")
-            if wait_try < 4:
-                log(f"再検索後のツイート読み込み待機中... ({wait_try + 1}/5)")
+            if wait_try < MAX_RELOAD_ATTEMPTS - 1:
+                log(f"再検索後のツイート読み込み待機中... ({wait_try + 1}/{MAX_RELOAD_ATTEMPTS})")
                 _handle_interruptions(page)
                 time.sleep(random.uniform(2, 4))
                 _human_scroll(page, random.uniform(500, 1000))
