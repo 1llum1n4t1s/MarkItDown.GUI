@@ -23,10 +23,6 @@ SUPPORTED_EXTENSIONS = {
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'}
 
-# LLM分析・整形時の閾値定数
-MIN_LEN_FOR_SUMMARY_CHECK = 200  # 要約結果の長さチェックを行う最小の元テキスト長
-MIN_SUMMARY_RATIO = 0.05  # 要約結果が元テキストの何%未満なら棄却するか
-
 
 def log_message(message):
     print(message, flush=True)
@@ -110,7 +106,8 @@ def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_
                         "【ルール】\n"
                         "- 元のテキストの言語をそのまま使用する（日本語→日本語、英語→英語）\n"
                         "- 出力はMarkdown形式で整形する\n"
-                        "- 情報を省略せず、網羅的に分析する\n"
+                        "- 情報を省略せず、網羅的かつ詳細に分析・説明する\n"
+                        "- 各セクションの内容を具体的に掘り下げ、要点だけでなく詳しい説明を含める\n"
                         "- 分析結果のMarkdownだけを出力する（説明文や前置きは不要）"
                     )
                 },
@@ -124,16 +121,7 @@ def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_
 
         summary = response.choices[0].message.content
         if summary and len(summary.strip()) > 0:
-            summary_len = len(summary)
-            original_len = len(raw_markdown)
-            ratio = summary_len / original_len if original_len > 0 else 1.0
-            log_message(f'LLM分析完了: {original_len}文字 → {summary_len}文字 ({ratio:.0%})')
-
-            # 分析結果が元テキストの5%未満に短縮された場合は短すぎと判断して棄却
-            if original_len > MIN_LEN_FOR_SUMMARY_CHECK and ratio < MIN_SUMMARY_RATIO:
-                log_message(f'LLM分析結果が短すぎる（{ratio:.0%}）ため、棄却します。')
-                return None
-
+            log_message(f'LLM分析完了: {len(raw_markdown)}文字 → {len(summary)}文字')
             return summary
         else:
             log_message('LLMまとめの結果が空でした。')
@@ -182,15 +170,7 @@ def refine_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_nam
 
         refined = response.choices[0].message.content
         if refined and len(refined.strip()) > 0:
-            refined_len = len(refined)
-            original_len = len(raw_markdown)
-            log_message(f'LLM整形完了: {original_len}文字 → {refined_len}文字')
-
-            # 整形結果が元テキストの50%未満に短縮された場合は要約と判断して棄却
-            if original_len > 100 and refined_len < original_len * 0.5:
-                log_message(f'LLM整形結果が大幅に短縮されている（{refined_len}/{original_len} = {refined_len/original_len:.0%}）ため、要約と判断して元のテキストを使用します。')
-                return raw_markdown
-
+            log_message(f'LLM整形完了: {len(raw_markdown)}文字 → {len(refined)}文字')
             return refined
         else:
             log_message('LLM整形の結果が空でした。元のテキストを使用します。')
