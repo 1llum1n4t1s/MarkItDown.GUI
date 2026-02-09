@@ -122,13 +122,13 @@ public sealed class WebScraperService : IDisposable
         {
             if (_playwrightScraper is null)
             {
-                throw new InvalidOperationException("Playwright スクレイパーが初期化されていません。");
+                throw new InvalidOperationException("スクレイパーが初期化されていません。");
             }
 
-            // Playwright + Ollama ガイド型でスクレイピング
-            _statusCallback?.Invoke("Playwright でスクレイピング中...");
-            _logMessage("Playwright + Ollama ガイド型でスクレイピングするのだ...");
-            await _playwrightScraper.ScrapeWithBrowserAsync(url, outputPath, ct);
+            // HTTP + Ollama ガイド型でスクレイピング（ブラウザ不要）
+            _statusCallback?.Invoke("HTTP でスクレイピング中...");
+            _logMessage("HTTP + Ollama ガイド型でスクレイピングするのだ（ブラウザ不使用）...");
+            await _playwrightScraper.ScrapeWithHttpAsync(url, outputPath, ct);
         }
 
         // Ollama で JSON を整形・まとめし、3ファイル出力する

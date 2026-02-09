@@ -200,6 +200,115 @@ public sealed class PlaywrightScraperService
     }
 
     /// <summary>
+    /// ブラウザを使わない HTTP ベースのスクレイピング。
+    /// requests + BeautifulSoup + Ollama ガイド型で処理する。
+    /// </summary>
+    public async Task ScrapeWithHttpAsync(string url, string outputPath, CancellationToken ct = default)
+    {
+        var appDir = Directory.GetCurrentDirectory();
+        var scriptPath = Path.Combine(appDir, "Scripts", "scrape_page_http.py");
+
+        if (!File.Exists(scriptPath))
+        {
+            throw new FileNotFoundException($"HTTP スクレイピングスクリプトが見つかりません: {scriptPath}");
+        }
+
+        _statusCallback?.Invoke("HTTP でページを取得中...");
+        _logMessage($"HTTP スクレイピング開始なのだ: {url}");
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _pythonExecutablePath,
+            WorkingDirectory = appDir,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        // Ollama 設定を環境変数で渡す
+        if (!string.IsNullOrEmpty(_ollamaUrl))
+            startInfo.Environment["OLLAMA_URL"] = _ollamaUrl;
+        if (!string.IsNullOrEmpty(_ollamaModel))
+            startInfo.Environment["OLLAMA_MODEL"] = _ollamaModel;
+
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.ArgumentList.Add(url);
+        startInfo.ArgumentList.Add(outputPath);
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            throw new InvalidOperationException("Python プロセスの起動に失敗しました");
+        }
+
+        using var idleCts = new CancellationTokenSource();
+
+        void ResetIdleTimer()
+        {
+            try
+            {
+                idleCts.CancelAfter(TimeoutSettings.PlaywrightScrapeTimeoutMs);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        ResetIdleTimer();
+
+        process.OutputDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrEmpty(e.Data))
+            {
+                _logMessage(e.Data);
+                ResetIdleTimer();
+            }
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrEmpty(e.Data))
+            {
+                _logMessage($"[stderr] {e.Data}");
+                ResetIdleTimer();
+            }
+        };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        try
+        {
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, idleCts.Token);
+            await process.WaitForExitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                _logMessage("HTTP スクレイピングがタイムアウトまたはキャンセルされたのだ。プロセスを強制終了するのだ。");
+                try { process.Kill(true); } catch (InvalidOperationException) { }
+            }
+            if (ct.IsCancellationRequested) throw;
+            throw new TimeoutException("HTTP スクレイピングがタイムアウトしました");
+        }
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"HTTP スクレイピングスクリプトがエラーで終了しました (終了コード: {process.ExitCode})");
+        }
+
+        if (!File.Exists(outputPath))
+        {
+            throw new FileNotFoundException($"出力ファイルが生成されませんでした: {outputPath}");
+        }
+
+        _logMessage($"HTTP スクレイピング完了なのだ: {outputPath}");
+    }
+
+    /// <summary>
     /// X/Twitter 専用スクレイピング。Pythonスクリプト scrape_x.py を起動して
     /// 全ツイート取得 + オリジナル品質画像ダウンロードを行う。
     /// </summary>

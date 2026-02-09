@@ -12,7 +12,7 @@
 - **Webスクレイピング**: URLを入力するだけでWebページの内容をJSON形式で抽出・保存
   - Reddit: JSON API による高速取得
   - X/Twitter: ユーザーのタイムライン全件取得＋画像オリジナル画質ダウンロード（セッション永続化対応）
-  - その他のサイト: Playwright + Ollamaガイド型で動的コンテンツ（ページネーション・無限スクロール等）にも対応
+  - その他のサイト: HTTP + Ollamaガイド型でブラウザを起動せずに高速取得（ページネーション対応）
 - **自動環境構築**: Python環境、FFmpeg、Ollamaを初回起動時に自動でダウンロード・セットアップ
 - **OSの環境を汚さないポータブル設計**: Python・FFmpeg・Ollama・LLMモデルなど全ての依存コンポーネントをアプリ内の `lib/` フォルダに格納。システムのPATH・レジストリ・既存のPython環境には一切影響しません。アンインストール時もフォルダ削除だけで完全にクリーンアップできます
 - **Ollama連携 (gemma3:4b)**: ローカルLLM を使用した画像説明の自動生成、Markdown整形・まとめ、スクレイピング戦略分析を統合
@@ -90,7 +90,7 @@ Ollama利用可能時は以下の3ファイルが出力されます（Ollama未�
 | 整形済 | `ファイル名_整形済_YYYYMMDDHHmmss.json` | Ollamaで構造化・整形したJSON |
 | まとめ済 | `ファイル名_まとめ済_YYYYMMDDHHmmss.md` | OllamaでまとめたMarkdown |
 
-処理中はオーバーレイに現在の進行状況（依存パッケージ確認 → Playwrightスクレイピング → Ollama JSON整形 → Ollamaまとめ）がリアルタイムで表示されます。
+処理中はオーバーレイに現在の進行状況（依存パッケージ確認 → スクレイピング → Ollama JSON整形 → Ollamaまとめ）がリアルタイムで表示されます。
 
 #### 対応サイト
 
@@ -98,7 +98,7 @@ Ollama利用可能時は以下の3ファイルが出力されます（Ollama未�
 |---|---|---|
 | Reddit | JSON API | 投稿・コメントを高速取得 |
 | X/Twitter | Playwright（専用スクリプト） | ユーザータイムライン全件取得、画像オリジナル画質DL、セッション永続化 |
-| その他 | Playwright + Ollama | ヘッドレスブラウザで動的コンテンツに対応 |
+| その他 | HTTP + Ollama | ブラウザ不使用、HTTPで高速取得（ページネーション対応） |
 
 #### X/Twitter スクレイピング
 
@@ -125,16 +125,19 @@ X/Twitter のユーザーページURL（例: `x.com/username`）を入力する�
 | `{username}_元データ_YYYYMMDDHHmmss.json` | 全ツイートのJSON（テキスト・メトリクス・画像情報） |
 | `{username}/` フォルダ | ダウンロードされた画像ファイル群 |
 
-#### Ollamaガイド型スクレイピング
+#### Ollamaガイド型スクレイピング（HTTPベース）
 
-Playwright（ヘッドレスブラウザ）とOllama（ローカルLLM）を組み合わせて、以下の動的コンテンツに対応します：
+HTTP（requests + BeautifulSoup）とOllama（ローカルLLM）を組み合わせて、ブラウザを起動せずにWebページを取得・解析します：
 
-- ページネーション（「次へ」ボタン）
-- 「もっと見る」ボタン
-- 無限スクロール
-- Cookie同意バナーの自動処理
+- ページ構造のDOM統計分析（タグ出現数、class名頻度、ID一覧）
+- OllamaによるCSS セレクタと抽出戦略の動的決定
+- 戦略ベースのコンテンツ抽出（リスト・記事・汎用ページに対応）
+- ページネーション（「次へ」リンクの自動検出・追跡）
+- メタデータ・JSON-LD構造化データの抽出
 
-OllamaのOpenAI互換チャットAPI（`/v1/chat/completions`）を使用して、ページの構造を分析し最適なスクレイピング戦略を決定します。マルチモーダルモデル（gemma3）を使用している場合、ページのスクリーンショットも分析に活用されます。
+OllamaのOpenAI互換チャットAPI（`/v1/chat/completions`）を使用して、HTMLの構造を分析し最適なスクレイピング戦略を決定します。ブラウザを使わないため起動が高速で、リソース消費も軽量です。
+
+> **注意**: JavaScriptで動的にレンダリングされるコンテンツ（SPAサイト等）は取得できない場合があります。X/Twitterのスクレイピングでは従来通りPlaywright（ブラウザ）が使用されます。
 
 ## Ollama連携機能（自動セットアップ）
 
@@ -258,7 +261,7 @@ Ollamaは以下の優先順位でGPUバックエンドを自動検出します�
 - **アーキテクチャ**: MVVM (Model-View-ViewModel)
 - **ファイル変換**: Microsoft MarkItDown（Python）
 - **LLMモデル**: gemma3:4b（Google製マルチモーダルモデル、アプリ内部固定）
-- **Webスクレイピング**: Playwright（ヘッドレスブラウザ）+ Ollama（構造分析・スクリーンショット解析）、X/Twitter専用スクレイパー
+- **Webスクレイピング**: HTTP + BeautifulSoup + Ollama（構造分析）による汎用スクレイピング、X/Twitter専用Playwrightスクレイパー
 - **GPU対応**: CUDA（NVIDIA）/ ROCm（AMD）/ Vulkan（Intel・AMD）を自動検出
 - **LLM連携**: Ollama OpenAI互換API (`/v1/chat/completions`)
 - **自動更新**: Velopack
