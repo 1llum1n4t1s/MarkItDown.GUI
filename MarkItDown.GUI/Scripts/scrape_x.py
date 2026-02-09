@@ -28,6 +28,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse, parse_qs, urlencode
 
+# リトライ回数の定数
+MAX_RELOAD_ATTEMPTS = 5  # 再検索後のツイート要素検出の最大リトライ回数
+
 def log(msg: str):
     """タイムスタンプ付きログ出力（C#側でアイドルタイムアウトをリセットする）"""
     print(f"[X.com] {msg}", flush=True)
@@ -366,8 +369,8 @@ def _manual_login(playwright_module, user_data_dir: str) -> tuple:
             if logged_in_el:
                 log(f"ログイン済みDOM要素を検知したのだ！ URL: {current_url}")
                 break
-        except Exception:
-            pass
+        except Exception as e:
+            log(f"ログイン状態のDOM検出中にエラーが発生したのだ: {e}")
 
         if elapsed % 30 == 0:
             log(f"ログイン待機中... ({elapsed}秒経過, URL: {current_url})")
@@ -478,8 +481,8 @@ def _handle_interruptions(page):
             time.sleep(3)
             return
 
-    except Exception:
-        pass
+    except Exception as e:
+        log(f"割り込み要素の処理中にエラーが発生したのだ: {e}")
 
 
 def scrape_tweets(page, username: str) -> list[dict]:
@@ -511,8 +514,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
                     dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                     if oldest_ts is None or dt < oldest_ts:
                         oldest_ts = dt
-                except Exception:
-                    pass
+                except Exception as e:
+                    log(f"タイムスタンプ解析エラー (値: {ts}): {e}")
         if oldest_ts:
             # until は「その日を含まない」ので +1日
             from datetime import timedelta
@@ -592,6 +595,21 @@ def scrape_tweets(page, username: str) -> list[dict]:
             log("日付情報がないため、通常検索で再開するのだ...")
         page.goto(search_url, wait_until="domcontentloaded", timeout=30000)
         time.sleep(random.uniform(4, 7))
+        # 検索結果が読み込まれるまでリトライ（最大5回）
+        for wait_try in range(MAX_RELOAD_ATTEMPTS):
+            try:
+                tweet_els = page.query_selector_all('article[data-testid="tweet"]')
+                if tweet_els and len(tweet_els) > 0:
+                    log(f"再検索後、ツイート要素を{len(tweet_els)}件検出したのだ。")
+                    break
+            except Exception as e:
+                log(f"ツイート要素の検出中にエラーが発生したのだ: {e}")
+            if wait_try < MAX_RELOAD_ATTEMPTS - 1:
+                log(f"再検索後のツイート読み込み待機中... ({wait_try + 1}/{MAX_RELOAD_ATTEMPTS})")
+                _handle_interruptions(page)
+                time.sleep(random.uniform(2, 4))
+                _human_scroll(page, random.uniform(500, 1000))
+                time.sleep(random.uniform(1, 2))
         scroll_count = 0
         no_new_count = 0
         return True
@@ -631,8 +649,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
 
         log(f"スクロール #{scroll_count}, 新規: {new_count}, 取得ツイート合計: {len(tweets)}")
 
-        # 新規0件が3回続いたら即座に迂回＋再検索
-        if no_new_count >= 3:
+        # 新規0件が5回続いたら迂回＋再検索
+        if no_new_count >= 5:
             log(f"連続{no_new_count}回新規ツイートなし。")
             if not _detour_and_resume():
                 break
@@ -888,8 +906,8 @@ def main():
         if context:
             try:
                 context.close()
-            except Exception:
-                pass
+            except Exception as e:
+                log(f"ブラウザコンテキストのクローズ中にエラーが発生したのだ: {e}")
 
 
 if __name__ == "__main__":

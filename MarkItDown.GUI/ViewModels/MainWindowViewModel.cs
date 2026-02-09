@@ -268,17 +268,19 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         // StringBuilderで効率的に結合
-        var sb = new System.Text.StringBuilder(_logBatch.Count * 50);
+        var batchLineCount = _logBatch.Count;
+        var sb = new System.Text.StringBuilder(batchLineCount * 50);
         foreach (var msg in _logBatch)
         {
             sb.AppendLine(msg);
-            _logLineCount++;
         }
         var batchContent = sb.ToString();
         _logBatch.Clear();
 
         Dispatcher.UIThread.Post(() =>
         {
+            _logLineCount += batchLineCount;
+
             // ログ行数上限超過時は古いログを削除
             // Split + Join の代わりに IndexOf で N番目の改行位置を探して Substring する
             if (_logLineCount > MaxLogLines)
@@ -348,6 +350,12 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        if (_isProcessing)
+        {
+            LogMessage("別の処理が実行中なのだ。完了するまで待つのだ。");
+            return;
+        }
+
         if (_fileProcessor is null)
         {
             LogMessage("初期化が完了していないのだ。しばらく待つのだ。");
@@ -386,6 +394,12 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        if (_isProcessing)
+        {
+            LogMessage("別の処理が実行中なのだ。完了するまで待つのだ。");
+            return;
+        }
+
         if (_webScraperService is null)
         {
             LogMessage("初期化が完了していないのだ。しばらく待つのだ。");
@@ -408,9 +422,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             {
                 var host = uri.Host.ToLowerInvariant();
                 if ((host is "x.com" or "www.x.com" or "twitter.com" or "www.twitter.com"
-                     or "mobile.twitter.com" or "mobile.x.com"))
+                     or "mobile.twitter.com" or "mobile.x.com")
+                    && WebScraperService.TryExtractXTwitterUsername(normalizedUrl, out var username))
                 {
-                    var username = WebScraperService.ExtractXTwitterUsername(normalizedUrl);
                     // 重複フォルダ回避: 同名フォルダが既に存在する場合は _1, _2, ... を付与
                     var baseDirName = username;
                     var userDir = System.IO.Path.Combine(outputDirectory, baseDirName);

@@ -23,9 +23,28 @@ SUPPORTED_EXTENSIONS = {
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp'}
 
+# LLM分析・整形時の閾値定数
+MIN_LEN_FOR_SUMMARY_CHECK = 200  # 要約結果の長さチェックを行う最小の元テキスト長
+MIN_SUMMARY_RATIO = 0.05  # 要約結果が元テキストの何%未満なら棄却するか
+
 
 def log_message(message):
     print(message, flush=True)
+
+def _write_output_file(content, base_name, suffix, timestamp, directory):
+    """ヘルパー関数: ファイルにコンテンツを書き込む。書き込んだファイル名を返す。"""
+    if not content or not content.strip():
+        log_message(f'{suffix} の内容が空のため、ファイル出力をスキップします。')
+        return None
+
+    filename = f'{base_name}_{suffix}_{timestamp}.md'
+    output_path = os.path.join(directory, filename)
+
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+    log_message(f'{suffix}出力完了: {output_path}')
+    return filename
 
 def create_openai_client(ollama_url):
     """OllamaのOpenAI互換クライアントを作成する。"""
@@ -64,6 +83,66 @@ def create_markitdown_instance(ollama_client, ollama_model):
     md = markitdown.MarkItDown()
     log_message('MarkItDownインスタンス作成（LLM統合なし）')
     return md
+
+def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_name):
+    """Ollamaを使ってMarkdownテキストを分析・統計まとめする。"""
+    if not ollama_client or not ollama_model:
+        return None
+
+    try:
+        log_message(f'LLMでMarkdown分析開始: {file_name}')
+
+        response = ollama_client.chat.completions.create(
+            model=ollama_model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "あなたは文書分析の専門家です。\n"
+                        "入力されたMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。\n\n"
+                        "【出力構成（この順序で出力すること）】\n"
+                        "1. 概要: 文書全体の目的・テーマを2〜3文で説明\n"
+                        "2. 統計情報: 文字数、段落数、見出し数、リンク数、画像数、表の数など該当するものを表形式で列挙\n"
+                        "3. 文書構造: 見出し階層をツリー形式で表示\n"
+                        "4. 主要トピック: 文書内の主要なトピックを箇条書きで列挙し、各トピックの要点を1〜2文で説明\n"
+                        "5. キーワード・固有名詞: 文書内で重要なキーワード、固有名詞、数値データを列挙\n"
+                        "6. 結論・要点: 文書の結論や最も重要なポイントをまとめる\n\n"
+                        "【ルール】\n"
+                        "- 元のテキストの言語をそのまま使用する（日本語→日本語、英語→英語）\n"
+                        "- 出力はMarkdown形式で整形する\n"
+                        "- 情報を省略せず、網羅的に分析する\n"
+                        "- 分析結果のMarkdownだけを出力する（説明文や前置きは不要）"
+                    )
+                },
+                {
+                    "role": "user",
+                    "content": f"以下のMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。\n\n{raw_markdown}"
+                }
+            ],
+            timeout=300
+        )
+
+        summary = response.choices[0].message.content
+        if summary and len(summary.strip()) > 0:
+            summary_len = len(summary)
+            original_len = len(raw_markdown)
+            ratio = summary_len / original_len if original_len > 0 else 1.0
+            log_message(f'LLM分析完了: {original_len}文字 → {summary_len}文字 ({ratio:.0%})')
+
+            # 分析結果が元テキストの5%未満に短縮された場合は短すぎと判断して棄却
+            if original_len > MIN_LEN_FOR_SUMMARY_CHECK and ratio < MIN_SUMMARY_RATIO:
+                log_message(f'LLM分析結果が短すぎる（{ratio:.0%}）ため、棄却します。')
+                return None
+
+            return summary
+        else:
+            log_message('LLMまとめの結果が空でした。')
+            return None
+
+    except Exception as e:
+        log_message(f'LLMまとめエラー: {e}')
+        return None
+
 
 def refine_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_name):
     """Ollamaを使って崩れたMarkdownテキストを整形する。"""
@@ -159,19 +238,9 @@ try:
                 traceback.print_exc()
                 raise
 
-            # OllamaでMarkdown整形を行う（全ファイル形式対象）
-            if (markdown_content and len(markdown_content.strip()) > 0
-                    and ollama_client and ollama_model):
-                markdown_content = await loop.run_in_executor(
-                    None, refine_markdown_with_llm,
-                    ollama_client, ollama_model, markdown_content, file_name
-                )
-
             # 変換結果が空の場合、ファイル情報を追加
             if not markdown_content or len(markdown_content.strip()) == 0:
                 log_message(f'警告: 変換結果が空です。ファイル情報を追加します。')
-
-                file_ext = os.path.splitext(file_path)[1].lower()
 
                 if file_ext in IMAGE_EXTENSIONS:
                     file_size = os.path.getsize(file_path)
@@ -189,17 +258,35 @@ try:
             else:
                 log_message(f'変換内容の先頭100文字: {markdown_content[:100]}')
 
-            # タイムスタンプを生成
+            # タイムスタンプを生成（全出力ファイルで共通）
             timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-            output_filename = f'{name_without_ext}_{timestamp}.md'
-            output_path = os.path.join(file_dir, output_filename)
-            log_message(f'出力パス: {output_path}')
 
-            with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(markdown_content)
+            # 1. 元データ（生データ）を出力
+            origin_filename = _write_output_file(
+                markdown_content, name_without_ext, '元データ', timestamp, file_dir
+            )
 
-            log_message(f'ファイル出力完了: {output_path}')
-            return f'変換完了: {file_name} → {output_filename}'
+            # 2. 整形済・まとめ済（Ollama利用可能時のみ）
+            if (markdown_content and len(markdown_content.strip()) > 0
+                    and ollama_client and ollama_model):
+                formatted_content = await loop.run_in_executor(
+                    None, refine_markdown_with_llm,
+                    ollama_client, ollama_model, markdown_content, file_name
+                )
+                _write_output_file(
+                    formatted_content, name_without_ext, '整形済', timestamp, file_dir
+                )
+
+                summary_content = await loop.run_in_executor(
+                    None, summarize_markdown_with_llm,
+                    ollama_client, ollama_model, markdown_content, file_name
+                )
+                _write_output_file(
+                    summary_content, name_without_ext, 'まとめ済', timestamp, file_dir
+                )
+
+            log_message(f'ファイル出力完了: {file_name}')
+            return f'変換完了: {file_name} → {origin_filename}'
 
         except Exception as e:
             error_type = type(e).__name__

@@ -135,7 +135,7 @@ public class OllamaManager : IDisposable
                 _logMessage("Ollamaサーバーを起動するのだ...");
                 await StartOllamaServerAsync();
 
-                // GPU（CUDA）初期化に時間がかかる場合があるため、
+                // GPU初期化に時間がかかる場合があるため、
                 // リトライ付きポーリングで接続を確認する（最大90秒）
                 const int maxRetries = 6;
                 const int retryDelayMs = 15_000; // 15秒間隔
@@ -185,7 +185,7 @@ public class OllamaManager : IDisposable
         try
         {
             _logMessage("Ollamaの接続テストを実行中なのだ...");
-            var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
+            using var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
 
             if (response.IsSuccessStatusCode)
             {
@@ -232,7 +232,7 @@ public class OllamaManager : IDisposable
             }
             else
             {
-                var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
+                using var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
                 if (!response.IsSuccessStatusCode)
                 {
                     return false;
@@ -280,18 +280,18 @@ public class OllamaManager : IDisposable
                 return Array.Empty<string>();
             }
 
-            var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
-            
+            using var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
+
             if (!response.IsSuccessStatusCode)
             {
                 return Array.Empty<string>();
             }
 
             var content = await response.Content.ReadAsStringAsync();
-            var jsonDoc = JsonDocument.Parse(content);
-            
+            using var jsonDoc = JsonDocument.Parse(content);
+
             var modelList = new System.Collections.Generic.List<string>();
-            
+
             if (jsonDoc.RootElement.TryGetProperty("models", out var models))
             {
                 foreach (var model in models.EnumerateArray())
@@ -427,7 +427,9 @@ public class OllamaManager : IDisposable
                     }
                     else
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+                        var destDir = Path.GetDirectoryName(destinationPath);
+                        if (destDir is not null)
+                            Directory.CreateDirectory(destDir);
                         entry.ExtractToFile(destinationPath, true);
                     }
                     
@@ -500,13 +502,13 @@ public class OllamaManager : IDisposable
             var startInfo = new ProcessStartInfo
             {
                 FileName = _ollamaExePath,
-                Arguments = "serve",
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 WorkingDirectory = Path.GetDirectoryName(_ollamaExePath)
             };
+            startInfo.ArgumentList.Add("serve");
 
             // URLプロトコルを削除（http://またはhttps://）
             var ollamaHost = _ollamaUrl
@@ -514,16 +516,14 @@ public class OllamaManager : IDisposable
                 .Replace("http://", "");
             startInfo.Environment["OLLAMA_HOST"] = ollamaHost;
             
-            var gpuDevice = AppSettings.GetOllamaGpuDevice()?.Trim();
-            if (!string.IsNullOrEmpty(gpuDevice) && gpuDevice != "0")
-            {
-                startInfo.Environment["CUDA_VISIBLE_DEVICES"] = gpuDevice;
-                _logMessage($"GPU設定なのだ: CUDA_VISIBLE_DEVICES={gpuDevice}");
-            }
-            else
-            {
-                _logMessage("GPU設定: 自動検出なのだ（CUDA_VISIBLE_DEVICES未設定）");
-            }
+            // Vulkan バックエンドを有効化（Intel GPU 対応に必須）
+            // Ollama のバックエンド優先順位は CUDA > ROCm > Vulkan なので、
+            // NVIDIA GPU がある場合は CUDA が優先され、Intel のみの場合に Vulkan が使われる
+            startInfo.Environment["OLLAMA_VULKAN"] = "1";
+
+            // 全モデルレイヤーを GPU にオフロードし、CPU フォールバックを防止する
+            startInfo.Environment["OLLAMA_NUM_GPU"] = "999";
+            _logMessage("GPU強制使用モードなのだ（Vulkan有効, 全レイヤーGPUオフロード, 自動検出）");
 
             _ollamaProcess = Process.Start(startInfo);
             if (_ollamaProcess != null)

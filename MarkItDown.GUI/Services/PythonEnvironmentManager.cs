@@ -429,6 +429,20 @@ public partial class PythonEnvironmentManager
                 return false;
             }
 
+            // 展開成功後、zipファイルを削除してディスク容量を節約
+            try
+            {
+                if (File.Exists(zipPath))
+                {
+                    File.Delete(zipPath);
+                    _logMessage("ダウンロードしたzipファイルを削除したのだ。");
+                }
+            }
+            catch (IOException ex)
+            {
+                _logWarning($"zipファイルの削除に失敗したのだ（処理は継続するのだ）: {ex.Message}");
+            }
+
             EnableSitePackages(embeddedPythonPath);
             await BootstrapPipAsync(embeddedPythonPath);
 

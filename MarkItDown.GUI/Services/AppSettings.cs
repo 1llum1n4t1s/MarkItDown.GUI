@@ -13,6 +13,7 @@ public class AppSettings
         AppPathHelper.SettingsDirectory,
         "appsettings.xml");
 
+    private static readonly object _lock = new();
     private static XDocument? _settingsDocument;
 
     /// <summary>
@@ -20,22 +21,25 @@ public class AppSettings
     /// </summary>
     public static void LoadSettings()
     {
-        try
+        lock (_lock)
         {
-            if (File.Exists(SettingsPath))
+            try
             {
-                _settingsDocument = XDocument.Load(SettingsPath);
+                if (File.Exists(SettingsPath))
+                {
+                    _settingsDocument = XDocument.Load(SettingsPath);
+                }
+                else
+                {
+                    // Create default settings file
+                    CreateDefaultSettings();
+                }
             }
-            else
+            catch (Exception ex)
             {
-                // Create default settings file
+                System.Diagnostics.Debug.WriteLine($"Failed to load settings: {ex.Message}");
                 CreateDefaultSettings();
             }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to load settings: {ex.Message}");
-            CreateDefaultSettings();
         }
     }
 
@@ -44,16 +48,19 @@ public class AppSettings
     /// </summary>
     public static string GetUpdateFeedUrl()
     {
-        try
+        lock (_lock)
         {
-            var url = _settingsDocument?.Root?.Element("UpdateFeedUrl")?.Value;
-            return !string.IsNullOrEmpty(url)
-                ? url
-                : GetDefaultUpdateFeedUrl();
-        }
-        catch
-        {
-            return GetDefaultUpdateFeedUrl();
+            try
+            {
+                var url = _settingsDocument?.Root?.Element("UpdateFeedUrl")?.Value;
+                return !string.IsNullOrEmpty(url)
+                    ? url
+                    : GetDefaultUpdateFeedUrl();
+            }
+            catch
+            {
+                return GetDefaultUpdateFeedUrl();
+            }
         }
     }
 
@@ -62,14 +69,17 @@ public class AppSettings
     /// </summary>
     public static string? GetPythonVersion()
     {
-        try
+        lock (_lock)
         {
-            var version = _settingsDocument?.Root?.Element("PythonVersion")?.Value;
-            return string.IsNullOrWhiteSpace(version) ? null : version.Trim();
-        }
-        catch
-        {
-            return null;
+            try
+            {
+                var version = _settingsDocument?.Root?.Element("PythonVersion")?.Value;
+                return string.IsNullOrWhiteSpace(version) ? null : version.Trim();
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 
@@ -79,36 +89,39 @@ public class AppSettings
     /// <param name="version">バージョン文字列（例: 3.12.0）</param>
     public static void SetPythonVersion(string? version)
     {
-        try
+        lock (_lock)
         {
-            var root = _settingsDocument?.Root;
-            if (root is null)
+            try
             {
-                return;
-            }
-
-            var element = root.Element("PythonVersion");
-            if (string.IsNullOrEmpty(version))
-            {
-                element?.Remove();
-            }
-            else
-            {
-                if (element is null)
+                var root = _settingsDocument?.Root;
+                if (root is null)
                 {
-                    root.Add(new XElement("PythonVersion", version));
+                    return;
+                }
+
+                var element = root.Element("PythonVersion");
+                if (string.IsNullOrEmpty(version))
+                {
+                    element?.Remove();
                 }
                 else
                 {
-                    element.Value = version;
+                    if (element is null)
+                    {
+                        root.Add(new XElement("PythonVersion", version));
+                    }
+                    else
+                    {
+                        element.Value = version;
+                    }
                 }
-            }
 
-            _settingsDocument?.Save(SettingsPath);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to save PythonVersion: {ex.Message}");
+                _settingsDocument?.Save(SettingsPath);
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to save PythonVersion: {ex.Message}");
+            }
         }
     }
 
@@ -117,14 +130,17 @@ public class AppSettings
     /// </summary>
     public static string? GetOllamaUrl()
     {
-        try
+        lock (_lock)
         {
-            var url = _settingsDocument?.Root?.Element("OllamaUrl")?.Value;
-            return string.IsNullOrWhiteSpace(url) ? null : url.Trim();
-        }
-        catch
-        {
-            return null;
+            try
+            {
+                var url = _settingsDocument?.Root?.Element("OllamaUrl")?.Value;
+                return string.IsNullOrWhiteSpace(url) ? null : url.Trim();
+            }
+            catch
+            {
+                return null;
+            }
         }
     }
 
@@ -134,92 +150,39 @@ public class AppSettings
     /// <param name="url">OllamaのURL（例: http://localhost:11434）</param>
     public static void SetOllamaUrl(string? url)
     {
-        try
+        lock (_lock)
         {
-            var root = _settingsDocument?.Root;
-            if (root is null)
+            try
             {
-                return;
-            }
-
-            var element = root.Element("OllamaUrl");
-            if (string.IsNullOrEmpty(url))
-            {
-                element?.Remove();
-            }
-            else
-            {
-                if (element is null)
+                var root = _settingsDocument?.Root;
+                if (root is null)
                 {
-                    root.Add(new XElement("OllamaUrl", url));
+                    return;
+                }
+
+                var element = root.Element("OllamaUrl");
+                if (string.IsNullOrEmpty(url))
+                {
+                    element?.Remove();
                 }
                 else
                 {
-                    element.Value = url;
+                    if (element is null)
+                    {
+                        root.Add(new XElement("OllamaUrl", url));
+                    }
+                    else
+                    {
+                        element.Value = url;
+                    }
                 }
+
+                _settingsDocument?.Save(SettingsPath);
             }
-
-            _settingsDocument?.Save(SettingsPath);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to save OllamaUrl: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Ollamaで使用するGPUデバイスIDを取得する
-    /// </summary>
-    /// <returns>GPUデバイスID（例: 0, 1, -1）。nullの場合はデフォルト値を使用</returns>
-    public static string? GetOllamaGpuDevice()
-    {
-        try
-        {
-            var device = _settingsDocument?.Root?.Element("OllamaGpuDevice")?.Value;
-            return string.IsNullOrWhiteSpace(device) ? null : device.Trim();
-        }
-        catch
-        {
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Ollamaで使用するGPUデバイスIDを保存する
-    /// </summary>
-    /// <param name="device">GPUデバイスID（例: 0, 1, -1=CPUのみ, 0,1=複数GPU）</param>
-    public static void SetOllamaGpuDevice(string? device)
-    {
-        try
-        {
-            var root = _settingsDocument?.Root;
-            if (root is null)
+            catch (Exception ex)
             {
-                return;
+                System.Diagnostics.Debug.WriteLine($"Failed to save OllamaUrl: {ex.Message}");
             }
-
-            var element = root.Element("OllamaGpuDevice");
-            if (string.IsNullOrEmpty(device))
-            {
-                element?.Remove();
-            }
-            else
-            {
-                if (element is null)
-                {
-                    root.Add(new XElement("OllamaGpuDevice", device));
-                }
-                else
-                {
-                    element.Value = device;
-                }
-            }
-
-            _settingsDocument?.Save(SettingsPath);
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"Failed to save OllamaGpuDevice: {ex.Message}");
         }
     }
 
@@ -241,8 +204,7 @@ public class AppSettings
             var root = new XElement("AppSettings",
                 new XElement("UpdateFeedUrl", GetDefaultUpdateFeedUrl()),
                 new XElement("PythonVersion", ""),
-                new XElement("OllamaUrl", "http://localhost:11434"),
-                new XElement("OllamaGpuDevice", "0")
+                new XElement("OllamaUrl", "http://localhost:11434")
             );
 
             _settingsDocument = new XDocument(root);

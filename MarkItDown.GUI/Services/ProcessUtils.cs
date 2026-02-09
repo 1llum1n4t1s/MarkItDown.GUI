@@ -60,7 +60,7 @@ public static class ProcessUtils
     /// <summary>
     /// コマンドが PATH 上に存在するかチェックする
     /// </summary>
-    public static bool TryCheckCommandVersion(string command, int timeoutMs, Action<string> logMessage)
+    public static async Task<bool> TryCheckCommandVersionAsync(string command, int timeoutMs, Action<string> logMessage)
     {
         try
         {
@@ -84,8 +84,20 @@ public static class ProcessUtils
                 return false;
             }
 
-            var exited = process.WaitForExit(timeoutMs);
-            return exited && process.ExitCode == 0;
+            using var cts = new CancellationTokenSource(timeoutMs);
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+                return process.ExitCode == 0;
+            }
+            catch (OperationCanceledException)
+            {
+                if (!process.HasExited)
+                {
+                    try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
+                }
+                return false;
+            }
         }
         catch (Exception ex)
         {
@@ -117,12 +129,12 @@ public static class ProcessUtils
 
         process.OutputDataReceived += (_, e) =>
         {
-            if (e.Data is not null) outputSb.AppendLine(e.Data);
+            if (e.Data is not null) lock (outputSb) { outputSb.AppendLine(e.Data); }
             else outputTcs.TrySetResult();
         };
         process.ErrorDataReceived += (_, e) =>
         {
-            if (e.Data is not null) errorSb.AppendLine(e.Data);
+            if (e.Data is not null) lock (errorSb) { errorSb.AppendLine(e.Data); }
             else errorTcs.TrySetResult();
         };
 
@@ -143,10 +155,21 @@ public static class ProcessUtils
                 try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
             }
 
-            if (ct.IsCancellationRequested)
-                return (-1, outputSb.ToString(), "プロセスがキャンセルされました");
+            // Kill後、ストリーム完了を短時間待機してからStringBuilderを読む
+            // （イベントハンドラがまだ実行中の可能性があるため）
+            try
+            {
+                await Task.WhenAll(outputTcs.Task, errorTcs.Task).WaitAsync(TimeSpan.FromSeconds(3));
+            }
+            catch { /* タイムアウトは無視 */ }
 
-            return (-1, outputSb.ToString(), "プロセスがタイムアウトしました");
+            string output;
+            lock (outputSb) { output = outputSb.ToString(); }
+
+            if (ct.IsCancellationRequested)
+                return (-1, output, "プロセスがキャンセルされました");
+
+            return (-1, output, "プロセスがタイムアウトしました");
         }
 
         return (process.ExitCode, outputSb.ToString(), errorSb.ToString());

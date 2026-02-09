@@ -104,7 +104,12 @@ public sealed class WebScraperService : IDisposable
             }
 
             var username = ExtractXTwitterUsername(url);
-            var outputDir = Path.GetDirectoryName(outputPath)!;
+            var outputDir = Path.GetDirectoryName(outputPath);
+            if (outputDir is null)
+            {
+                _logError($"出力ディレクトリの取得に失敗したのだ: {outputPath}");
+                return;
+            }
             _statusCallback?.Invoke($"X.com (@{username}) のスクレイピング中...");
             _logMessage($"X.com 専用スクレイピングを開始するのだ: @{username}");
             await _playwrightScraper.ScrapeXTwitterAsync(username, outputDir, ct);
@@ -126,8 +131,8 @@ public sealed class WebScraperService : IDisposable
             await _playwrightScraper.ScrapeWithBrowserAsync(url, outputPath, ct);
         }
 
-        // Ollama で JSON を整形する
-        await FormatJsonWithOllamaAsync(outputPath, ct);
+        // Ollama で JSON を整形・まとめし、3ファイル出力する
+        await ProcessJsonWithOllamaAsync(outputPath, ct);
 
         _statusCallback?.Invoke("スクレイピング完了");
     }
@@ -197,39 +202,52 @@ public sealed class WebScraperService : IDisposable
     // ────────────────────────────────────────────
 
     /// <summary>
-    /// Ollama を使用してスクレイピング結果のJSONを整形する。
-    /// 情報を欠落させずに、整った構造のJSONに変換する。
-    /// 大きなJSONはチャンク分割して処理する。
+    /// スクレイピング結果のJSONを3種類のファイルに分けて出力する。
+    /// 元データ（生JSON）、整形済（Ollama整形JSON）、まとめ済（OllamaによるMarkdownまとめ）。
+    /// Ollamaが利用できない場合は元データのリネームのみ行う。
     /// </summary>
-    private async Task FormatJsonWithOllamaAsync(string jsonFilePath, CancellationToken ct)
+    private async Task ProcessJsonWithOllamaAsync(string jsonFilePath, CancellationToken ct)
     {
-        if (string.IsNullOrEmpty(_ollamaUrl) || string.IsNullOrEmpty(_ollamaModel))
-        {
-            _logMessage("Ollama が設定されていないため、JSON整形をスキップするのだ。");
-            return;
-        }
-
         if (!File.Exists(jsonFilePath))
         {
             return;
         }
 
+        var dir = Path.GetDirectoryName(jsonFilePath);
+        if (dir is null)
+        {
+            _logError($"出力ディレクトリの取得に失敗したのだ: {jsonFilePath}");
+            return;
+        }
+        var nameWithoutExt = Path.GetFileNameWithoutExtension(jsonFilePath);
+        var timestamp = DateTime.Now.ToString("yyyyMMddHHmmss");
+
+        // 1. 元データ: ファイルをリネーム
+        var originPath = Path.Combine(dir, $"{nameWithoutExt}_元データ_{timestamp}.json");
+        File.Move(jsonFilePath, originPath);
+        _logMessage($"元データ出力完了なのだ: {originPath}");
+
+        if (string.IsNullOrEmpty(_ollamaUrl) || string.IsNullOrEmpty(_ollamaModel))
+        {
+            _logMessage("Ollama が設定されていないため、整形・まとめをスキップするのだ。");
+            return;
+        }
+
         try
         {
-            _statusCallback?.Invoke("Ollama でJSON整形中...");
-            _logMessage("Ollama でJSON整形を開始するのだ...");
-            var rawJson = await File.ReadAllTextAsync(jsonFilePath, System.Text.Encoding.UTF8, ct);
+            var rawJson = await File.ReadAllTextAsync(originPath, System.Text.Encoding.UTF8, ct);
 
             if (string.IsNullOrWhiteSpace(rawJson))
             {
-                _logMessage("JSONファイルが空のため、整形をスキップするのだ。");
+                _logMessage("JSONファイルが空のため、整形・まとめをスキップするのだ。");
                 return;
             }
 
-            // JSONのサイズに応じて処理を分岐
-            // Ollamaのコンテキストウィンドウを考慮し、約30KB以下なら一括処理
-            const int chunkThreshold = 30_000;
+            // 2. 整形済: Ollama でJSON整形
+            _statusCallback?.Invoke("Ollama でJSON整形中...");
+            _logMessage("Ollama でJSON整形を開始するのだ...");
 
+            const int chunkThreshold = 30_000;
             string? formattedJson;
             if (rawJson.Length <= chunkThreshold)
             {
@@ -242,37 +260,62 @@ public sealed class WebScraperService : IDisposable
 
             if (!string.IsNullOrWhiteSpace(formattedJson))
             {
-                // 整形結果がJSON として有効かチェック
                 try
                 {
                     JsonSerializer.Deserialize<JsonElement>(formattedJson);
-                    await File.WriteAllTextAsync(jsonFilePath, formattedJson, System.Text.Encoding.UTF8, ct);
-                    _logMessage("Ollama によるJSON整形が完了したのだ！");
+                    await WriteOllamaOutputAsync(formattedJson, dir, nameWithoutExt, timestamp, "整形済", "json", ct);
                 }
                 catch (JsonException)
                 {
-                    _logMessage("Ollama の出力が有効なJSONではないため、元のJSONを保持するのだ。");
+                    _logMessage("Ollama の出力が有効なJSONではないため、整形済ファイルの出力をスキップするのだ。");
                 }
             }
             else
             {
-                _logMessage("Ollama からの応答が空のため、元のJSONを保持するのだ。");
+                _logMessage("Ollama からの応答が空のため、整形済ファイルの出力をスキップするのだ。");
             }
+
+            // 3. まとめ済: Ollama でMarkdownまとめ
+            _statusCallback?.Invoke("Ollama でJSONまとめ中...");
+            _logMessage("Ollama でJSONまとめを開始するのだ...");
+
+            var summaryMd = await SummarizeJsonWithOllamaAsync(rawJson, ct);
+            await WriteOllamaOutputAsync(summaryMd, dir, nameWithoutExt, timestamp, "まとめ済", "md", ct);
         }
         catch (HttpRequestException ex)
         {
             _logError($"Ollama への接続に失敗したのだ: {ex.Message}");
-            _logMessage("元のJSONをそのまま保持するのだ。");
+            _logMessage("元データのみ保持するのだ。");
         }
         catch (TaskCanceledException)
         {
-            _logMessage("Ollama のJSON整形がタイムアウトしたのだ。元のJSONを保持するのだ。");
+            _logMessage("Ollama の処理がタイムアウトしたのだ。元データのみ保持するのだ。");
         }
         catch (Exception ex)
         {
-            _logError($"JSON整形中にエラーが発生したのだ: {ex.Message}");
-            _logMessage("元のJSONをそのまま保持するのだ。");
+            _logError($"JSON整形・まとめ中にエラーが発生したのだ: {ex.Message}");
+            _logMessage("元データのみ保持するのだ。");
         }
+    }
+
+    /// <summary>
+    /// Ollama の出力をファイルに書き込む共通ヘルパー。
+    /// content が空の場合はスキップし、書き込んだパスを返す（スキップ時は null）。
+    /// </summary>
+    private async Task<string?> WriteOllamaOutputAsync(
+        string? content, string directory, string baseName, string timestamp,
+        string suffix, string extension, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(content))
+        {
+            _logMessage($"Ollama からの{suffix}応答が空のため、{suffix}ファイルの出力をスキップするのだ。");
+            return null;
+        }
+
+        var path = Path.Combine(directory, $"{baseName}_{suffix}_{timestamp}.{extension}");
+        await File.WriteAllTextAsync(path, content, System.Text.Encoding.UTF8, ct);
+        _logMessage($"{suffix}出力完了なのだ: {path}");
+        return path;
     }
 
     /// <summary>
@@ -458,7 +501,7 @@ public sealed class WebScraperService : IDisposable
         var requestJson = JsonSerializer.Serialize(requestBody);
         using var content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json");
 
-        var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/v1/chat/completions", content, ct);
+        using var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/v1/chat/completions", content, ct);
         response.EnsureSuccessStatusCode();
 
         var responseJson = await response.Content.ReadAsStringAsync(ct);
@@ -568,6 +611,38 @@ public sealed class WebScraperService : IDisposable
         return $"以下のJSONを整形してください。整形されたJSONのみを出力してください:\n\n{rawJson}";
     }
 
+    /// <summary>
+    /// JSON分析・統計まとめ用のシステムプロンプト
+    /// </summary>
+    private const string SummarySystemPrompt = """
+        あなたは文書分析の専門家です。
+        入力されたJSONデータの内容を分析し、統計情報と構造化されたまとめをMarkdown形式で作成してください。
+
+        【出力構成（この順序で出力すること）】
+        1. 概要: データ全体の目的・テーマを2〜3文で説明
+        2. 統計情報: レコード数、フィールド数、データ型の分布、ユニーク値の数など該当するものを表形式で列挙
+        3. データ構造: JSONの階層構造やキー一覧をツリー形式で表示
+        4. 主要トピック: データ内の主要なトピック・カテゴリを箇条書きで列挙し、各トピックの要点を1〜2文で説明
+        5. キーワード・固有名詞: データ内で重要なキーワード、固有名詞、数値データを列挙
+        6. 結論・要点: データから読み取れる結論や最も重要なポイントをまとめる
+
+        【ルール】
+        1. 元のテキストの言語をそのまま使用する（日本語→日本語、英語→英語）
+        2. JSONの構造そのものではなく、内容・意味を分析する
+        3. 出力はMarkdown形式のみ（JSONではない）
+        4. 情報を省略せず、網羅的に分析する
+        5. 分析結果のMarkdownだけを出力する（説明文や前置きは不要）
+        """;
+
+    /// <summary>
+    /// Ollama を使用してJSONデータを分析・統計まとめする
+    /// </summary>
+    private async Task<string?> SummarizeJsonWithOllamaAsync(string rawJson, CancellationToken ct)
+    {
+        var userMessage = $"以下のJSONデータを分析し、統計情報と構造化されたまとめをMarkdown形式で作成してください:\n\n{rawJson}";
+        return await CallOllamaChatAsync(SummarySystemPrompt, userMessage, ct);
+    }
+
     // ────────────────────────────────────────────
     //  サイト種別判定
     // ────────────────────────────────────────────
@@ -652,6 +727,38 @@ public sealed class WebScraperService : IDisposable
         return username;
     }
 
+    /// <summary>
+    /// X/TwitterのユーザーページURLであればユーザー名を取得する
+    /// </summary>
+    public static bool TryExtractXTwitterUsername(string url, out string username)
+    {
+        username = string.Empty;
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!IsXTwitterUserUrl(uri))
+        {
+            return false;
+        }
+
+        var path = uri.AbsolutePath.Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        username = path.Split('/')[0];
+        if (username.Contains('?'))
+        {
+            username = username.Split('?')[0];
+        }
+
+        return !string.IsNullOrWhiteSpace(username);
+    }
+
     // ────────────────────────────────────────────
     //  URL正規化
     // ────────────────────────────────────────────
@@ -681,7 +788,7 @@ public sealed class WebScraperService : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Get, jsonUrl);
         request.Headers.Accept.ParseAdd("application/json");
 
-        var response = await _httpClient.SendAsync(request, ct);
+        using var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content.ReadAsStringAsync(ct);
