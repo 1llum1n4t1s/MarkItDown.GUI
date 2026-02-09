@@ -11,6 +11,7 @@
 - **多様なファイル形式に対応**: Office文書、PDF、画像、音声、テキスト、アーカイブなど幅広く対応
 - **Webスクレイピング**: URLを入力するだけでWebページの内容をJSON形式で抽出・保存
   - Reddit: JSON API による高速取得
+  - X/Twitter: ユーザーのタイムライン全件取得＋画像オリジナル画質ダウンロード（セッション永続化対応）
   - その他のサイト: Playwright + Ollamaガイド型で動的コンテンツ（ページネーション・無限スクロール等）にも対応
 - **自動環境構築**: Python環境、FFmpeg、Ollamaを初回起動時に自動でダウンロード・セットアップ
 - **OSの環境を汚さないポータブル設計**: Python・FFmpeg・Ollama・LLMモデルなど全ての依存コンポーネントをアプリ内の `lib/` フォルダに格納。システムのPATH・レジストリ・既存のPython環境には一切影響しません。アンインストール時もフォルダ削除だけで完全にクリーンアップできます
@@ -18,7 +19,8 @@
 - **3種類のファイル出力**: 元データ・整形済・まとめ済の3ファイルを自動生成（Ollama利用時。元データとの比較で整形による情報損失をチェック可能）
 - **並列処理**: 最大3ファイルの同時変換で高速処理
 - **重複処理の回避**: 同じファイルの再処理をキャッシュでスキップ
-- **パッケージ自動更新**: 起動時にPythonパッケージ（markitdown、openai、playwright）の最新バージョンを自動確認・更新
+- **GPUアクセラレーション**: NVIDIA（CUDA）、AMD（ROCm）、Intel（Vulkan）GPUを自動検出・活用してLLM推論を高速化
+- **パッケージ自動更新**: 起動時にPythonパッケージ（markitdown、openai、playwright、httpx）の最新バージョンを自動確認・更新
 - **自動アップデート**: アプリ起動時に最新版を自動チェック・適用
 - **モダンなUI**: Avalonia UIを使用した軽量で使いやすいインターフェース（処理中オーバーレイによる進捗表示付き）
 
@@ -95,7 +97,33 @@ Ollama利用可能時は以下の3ファイルが出力されます（Ollama未�
 | サイト種別 | 取得方法 | 特徴 |
 |---|---|---|
 | Reddit | JSON API | 投稿・コメントを高速取得 |
+| X/Twitter | Playwright（専用スクリプト） | ユーザータイムライン全件取得、画像オリジナル画質DL、セッション永続化 |
 | その他 | Playwright + Ollama | ヘッドレスブラウザで動的コンテンツに対応 |
+
+#### X/Twitter スクレイピング
+
+X/Twitter のユーザーページURL（例: `x.com/username`）を入力すると、専用スクレイパーが起動します。
+
+**主な機能：**
+- ユーザーの全オリジナルツイートを取得（リツイートは除外）
+- 添付画像をオリジナル画質（`name=orig`）で自動ダウンロード
+- セッション永続化により2回目以降はログイン不要
+- BOT検出回避のためのランダムスクロール・迂回ナビゲーション
+
+**初回利用時：**
+1. ブラウザウィンドウが自動で開きます（ヘッドレスではなく表示モード）
+2. X/Twitterにログインしてください（最大10分間待機）
+3. ログインが検出されると自動的にスクレイピングが開始されます
+4. セッション情報は `lib/playwright/x_profile/` に保存され、次回以降は自動ログインされます
+
+> **注意**: X/Twitterのデータは大量になるため、Ollama整形・まとめ処理はスキップされます。元データ（JSON）のみ出力されます。
+
+**出力ファイル：**
+
+| ファイル | 内容 |
+|---|---|
+| `{username}_元データ_YYYYMMDDHHmmss.json` | 全ツイートのJSON（テキスト・メトリクス・画像情報） |
+| `{username}/` フォルダ | ダウンロードされた画像ファイル群 |
 
 #### Ollamaガイド型スクレイピング
 
@@ -161,6 +189,14 @@ Ollamaと **gemma3:4b**（Google製マルチモーダルモデル）を使用し
 
 #### GPU設定（OllamaGpuDevice）
 
+Ollamaは以下の優先順位でGPUバックエンドを自動検出します：
+
+1. **CUDA**（NVIDIA GPU）— 最優先
+2. **ROCm**（AMD GPU）
+3. **Vulkan**（Intel / AMD GPU）— フォールバック
+
+アプリはVulkanバックエンドを自動的に有効化（`OLLAMA_VULKAN=1`）し、全モデルレイヤーをGPUにオフロード（`OLLAMA_NUM_GPU=999`）します。NVIDIA GPUが利用可能な場合はCUDAが自動的に優先されます。
+
 使用するGPUを指定できます：
 
 - **未設定または`0`** (デフォルト): Ollamaが自動でGPUを検出して使用（推奨）
@@ -171,7 +207,7 @@ Ollamaと **gemma3:4b**（Google製マルチモーダルモデル）を使用し
 `CUDA_VISIBLE_DEVICES`を設定すると環境によってはGPUが検出されない場合があるため、デフォルトでは未設定（自動検出）にしています。複数GPUで特定のGPUを使いたい場合のみ設定してください。
 
 **GPU IDの確認方法:**
-コマンドプロンプトで `nvidia-smi -L` を実行すると、利用可能なGPUのリストが表示されます。
+コマンドプロンプトで `nvidia-smi -L`（NVIDIA）を実行すると、利用可能なGPUのリストが表示されます。
 
 ### 注意事項
 
@@ -193,13 +229,14 @@ Ollamaと **gemma3:4b**（Google製マルチモーダルモデル）を使用し
 | markitdown（最新版） | ファイル変換ライブラリ（pip自動インストール・更新） | Python site-packages |
 | openai | OllamaのOpenAI互換API利用（pip自動インストール・更新） | Python site-packages |
 | playwright | Webスクレイピング用ブラウザ自動化（pip自動インストール・更新） | Python site-packages |
+| httpx | X/Twitter画像ダウンロード用HTTPクライアント（pip自動インストール・更新） | Python site-packages |
 
 ### OSの環境を汚さないポータブル設計
 
 全ての依存コンポーネントはアプリケーションフォルダ内の `lib/` 配下に自己完結して格納されます。
 
 - **Python**: 公式の埋め込み版（Windows Embeddable Package）を使用。システムにインストール済みのPython環境には一切干渉しません
-- **Pythonパッケージ**: markitdown、openai、playwright等は埋め込みPython専用の site-packages にインストールされます
+- **Pythonパッケージ**: markitdown、openai、playwright、httpx等は埋め込みPython専用の site-packages にインストールされます
 - **FFmpeg**: `lib/ffmpeg/` に格納。システムのPATHやレジストリは変更しません
 - **Ollama & LLMモデル**: `lib/ollama/` に格納。システムにインストールされたOllamaとは独立して動作します
 
@@ -221,7 +258,8 @@ Ollamaと **gemma3:4b**（Google製マルチモーダルモデル）を使用し
 - **アーキテクチャ**: MVVM (Model-View-ViewModel)
 - **ファイル変換**: Microsoft MarkItDown（Python）
 - **LLMモデル**: gemma3:4b（Google製マルチモーダルモデル、アプリ内部固定）
-- **Webスクレイピング**: Playwright（ヘッドレスブラウザ）+ Ollama（構造分析・スクリーンショット解析）
+- **Webスクレイピング**: Playwright（ヘッドレスブラウザ）+ Ollama（構造分析・スクリーンショット解析）、X/Twitter専用スクレイパー
+- **GPU対応**: CUDA（NVIDIA）/ ROCm（AMD）/ Vulkan（Intel・AMD）を自動検出
 - **LLM連携**: Ollama OpenAI互換API (`/v1/chat/completions`)
 - **自動更新**: Velopack
 - **ログ**: ZLogger（ローリングファイル出力）
