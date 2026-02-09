@@ -268,17 +268,19 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         }
 
         // StringBuilderで効率的に結合
-        var sb = new System.Text.StringBuilder(_logBatch.Count * 50);
+        var batchLineCount = _logBatch.Count;
+        var sb = new System.Text.StringBuilder(batchLineCount * 50);
         foreach (var msg in _logBatch)
         {
             sb.AppendLine(msg);
-            _logLineCount++;
         }
         var batchContent = sb.ToString();
         _logBatch.Clear();
 
         Dispatcher.UIThread.Post(() =>
         {
+            _logLineCount += batchLineCount;
+
             // ログ行数上限超過時は古いログを削除
             // Split + Join の代わりに IndexOf で N番目の改行位置を探して Substring する
             if (_logLineCount > MaxLogLines)
@@ -348,6 +350,12 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        if (_isProcessing)
+        {
+            LogMessage("別の処理が実行中なのだ。完了するまで待つのだ。");
+            return;
+        }
+
         if (_fileProcessor is null)
         {
             LogMessage("初期化が完了していないのだ。しばらく待つのだ。");
@@ -383,6 +391,12 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         if (string.IsNullOrWhiteSpace(url))
         {
             LogMessage("URLが入力されていないのだ。");
+            return;
+        }
+
+        if (_isProcessing)
+        {
+            LogMessage("別の処理が実行中なのだ。完了するまで待つのだ。");
             return;
         }
 
