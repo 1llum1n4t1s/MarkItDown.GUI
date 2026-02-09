@@ -185,7 +185,7 @@ public class OllamaManager : IDisposable
         try
         {
             _logMessage("Ollamaの接続テストを実行中なのだ...");
-            var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
+            using var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
 
             if (response.IsSuccessStatusCode)
             {
@@ -232,7 +232,7 @@ public class OllamaManager : IDisposable
             }
             else
             {
-                var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
+                using var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
                 if (!response.IsSuccessStatusCode)
                 {
                     return false;
@@ -280,8 +280,8 @@ public class OllamaManager : IDisposable
                 return Array.Empty<string>();
             }
 
-            var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
-            
+            using var response = await _httpClient.GetAsync($"{_ollamaUrl}/api/tags");
+
             if (!response.IsSuccessStatusCode)
             {
                 return Array.Empty<string>();
@@ -427,7 +427,9 @@ public class OllamaManager : IDisposable
                     }
                     else
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(destinationPath)!);
+                        var destDir = Path.GetDirectoryName(destinationPath);
+                        if (destDir is not null)
+                            Directory.CreateDirectory(destDir);
                         entry.ExtractToFile(destinationPath, true);
                     }
                     

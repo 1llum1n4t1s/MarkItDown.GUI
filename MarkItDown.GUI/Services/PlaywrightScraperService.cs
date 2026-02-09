@@ -317,7 +317,13 @@ public sealed class PlaywrightScraperService
         if (process.ExitCode == 3)
         {
             // セッション切れ: プロファイルディレクトリを削除
-            var profileDir = Path.Combine(Path.GetDirectoryName(sessionPath)!, "x_profile");
+            var sessionDir = Path.GetDirectoryName(sessionPath);
+            if (sessionDir is null)
+            {
+                throw new InvalidOperationException(
+                    "X.comのセッションが無効です。再度実行するとブラウザが開くので、ログインしてください。");
+            }
+            var profileDir = Path.Combine(sessionDir, "x_profile");
             if (Directory.Exists(profileDir))
             {
                 try { Directory.Delete(profileDir, true); }

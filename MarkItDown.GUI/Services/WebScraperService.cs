@@ -501,7 +501,7 @@ public sealed class WebScraperService : IDisposable
         var requestJson = JsonSerializer.Serialize(requestBody);
         using var content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json");
 
-        var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/v1/chat/completions", content, ct);
+        using var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/v1/chat/completions", content, ct);
         response.EnsureSuccessStatusCode();
 
         var responseJson = await response.Content.ReadAsStringAsync(ct);
@@ -788,7 +788,7 @@ public sealed class WebScraperService : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Get, jsonUrl);
         request.Headers.Accept.ParseAdd("application/json");
 
-        var response = await _httpClient.SendAsync(request, ct);
+        using var response = await _httpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content.ReadAsStringAsync(ct);

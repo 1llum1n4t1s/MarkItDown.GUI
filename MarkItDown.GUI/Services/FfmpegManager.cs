@@ -285,7 +285,8 @@ public partial class FfmpegManager
             {
                 var candidate = Path.Combine(baseDir, sub);
                 if (!File.Exists(candidate)) continue;
-                var dir = Path.GetDirectoryName(candidate)!;
+                var dir = Path.GetDirectoryName(candidate);
+                if (dir is null) continue;
                 _logMessage($"7z.dll 検出なのだ: {candidate}");
                 SetDllDirectory(dir);
                 return;
