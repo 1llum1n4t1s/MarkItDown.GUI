@@ -5,6 +5,7 @@ using System.IO;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using MarkItDown.GUI.Models;
 
 namespace MarkItDown.GUI.Services;
 
@@ -221,8 +222,8 @@ public class FileProcessor
 
             // BOMなしのUTF-8でファイルを保存
             var utf8NoBom = new UTF8Encoding(false);
-            var filePathsJson = JsonSerializer.Serialize(files);
-            var folderPathsJson = JsonSerializer.Serialize(folders);
+            var filePathsJson = JsonSerializer.Serialize(files, AppJsonContext.Default.StringArray);
+            var folderPathsJson = JsonSerializer.Serialize(folders, AppJsonContext.Default.StringArray);
 
             File.WriteAllText(tempFilePathsJson, filePathsJson, utf8NoBom);
             File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);
@@ -267,8 +268,8 @@ public class FileProcessor
 
             // BOMなしのUTF-8でファイルを保存
             var utf8NoBom = new UTF8Encoding(false);
-            var filePathsJson = JsonSerializer.Serialize(files);
-            var folderPathsJson = JsonSerializer.Serialize(folders);
+            var filePathsJson = JsonSerializer.Serialize(files, AppJsonContext.Default.StringArray);
+            var folderPathsJson = JsonSerializer.Serialize(folders, AppJsonContext.Default.StringArray);
 
             File.WriteAllText(tempFilePathsJson, filePathsJson, utf8NoBom);
             File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);

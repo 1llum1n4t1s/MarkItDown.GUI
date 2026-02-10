@@ -85,13 +85,7 @@ public sealed class WebScraperService : IDisposable
             // Reddit は JSON API で取得 → C# 側で処理
             _statusCallback?.Invoke("Reddit API からデータを取得中...");
             var result = await ScrapeRedditAsync(url, ct);
-            var options = new JsonSerializerOptions
-            {
-                WriteIndented = true,
-                Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
-                DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-            };
-            var json = JsonSerializer.Serialize(result, options);
+            var json = JsonSerializer.Serialize(result, AppJsonIndentedContext.Default.RedditThreadData);
             await File.WriteAllTextAsync(outputPath, json, System.Text.Encoding.UTF8, ct);
             _logMessage($"JSONファイルを出力したのだ: {outputPath}");
         }
@@ -262,7 +256,7 @@ public sealed class WebScraperService : IDisposable
             {
                 try
                 {
-                    JsonSerializer.Deserialize<JsonElement>(formattedJson);
+                    JsonSerializer.Deserialize(formattedJson, AppJsonContext.Default.JsonElement);
                     await WriteOllamaOutputAsync(formattedJson, dir, nameWithoutExt, timestamp, "整形済", "json", ct);
                 }
                 catch (JsonException)
@@ -337,7 +331,7 @@ public sealed class WebScraperService : IDisposable
 
         try
         {
-            var root = JsonSerializer.Deserialize<JsonElement>(rawJson);
+            var root = JsonSerializer.Deserialize(rawJson, AppJsonContext.Default.JsonElement);
 
             // 複数ページ構造の場合、ページごとに分割処理
             if (root.ValueKind == JsonValueKind.Object &&
@@ -372,12 +366,6 @@ public sealed class WebScraperService : IDisposable
     private async Task<string?> FormatMultiPageJsonAsync(
         JsonElement root, JsonElement pages, CancellationToken ct)
     {
-        var jsonOptions = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        };
-
         var formattedPages = new List<JsonElement>();
         var pageCount = pages.GetArrayLength();
 
@@ -387,14 +375,14 @@ public sealed class WebScraperService : IDisposable
             _statusCallback?.Invoke($"ページ {i + 1}/{pageCount} を整形中...");
             _logMessage($"ページ {i + 1}/{pageCount} を整形中なのだ...");
 
-            var pageJson = JsonSerializer.Serialize(pages[i], jsonOptions);
+            var pageJson = JsonSerializer.Serialize(pages[i], AppJsonIndentedContext.Default.JsonElement);
             var formatted = await FormatJsonChunkWithOllamaAsync(pageJson, ct);
 
             if (!string.IsNullOrWhiteSpace(formatted))
             {
                 try
                 {
-                    formattedPages.Add(JsonSerializer.Deserialize<JsonElement>(formatted));
+                    formattedPages.Add(JsonSerializer.Deserialize(formatted, AppJsonContext.Default.JsonElement));
                     continue;
                 }
                 catch (JsonException)
@@ -407,12 +395,12 @@ public sealed class WebScraperService : IDisposable
         }
 
         // トップレベル構造を再構築
-        var resultDict = new Dictionary<string, object>();
+        var resultDict = new Dictionary<string, JsonElement>();
         foreach (var prop in root.EnumerateObject())
         {
             if (prop.Name == "pages")
             {
-                resultDict["pages"] = formattedPages;
+                resultDict["pages"] = JsonSerializer.SerializeToElement(formattedPages, AppJsonContext.Default.ListJsonElement);
             }
             else
             {
@@ -420,7 +408,7 @@ public sealed class WebScraperService : IDisposable
             }
         }
 
-        return JsonSerializer.Serialize(resultDict, jsonOptions);
+        return JsonSerializer.Serialize(resultDict, AppJsonIndentedContext.Default.DictionaryStringJsonElement);
     }
 
     /// <summary>
@@ -429,12 +417,6 @@ public sealed class WebScraperService : IDisposable
     private async Task<string?> FormatSinglePageLargeJsonAsync(
         JsonElement root, JsonElement contentArray, CancellationToken ct)
     {
-        var jsonOptions = new JsonSerializerOptions
-        {
-            WriteIndented = true,
-            Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
-        };
-
         var formattedItems = new List<JsonElement>();
         var itemCount = contentArray.GetArrayLength();
 
@@ -444,14 +426,14 @@ public sealed class WebScraperService : IDisposable
             _statusCallback?.Invoke($"content要素 {i + 1}/{itemCount} を整形中...");
             _logMessage($"content要素 {i + 1}/{itemCount} を整形中なのだ...");
 
-            var itemJson = JsonSerializer.Serialize(contentArray[i], jsonOptions);
+            var itemJson = JsonSerializer.Serialize(contentArray[i], AppJsonIndentedContext.Default.JsonElement);
             var formatted = await FormatJsonChunkWithOllamaAsync(itemJson, ct);
 
             if (!string.IsNullOrWhiteSpace(formatted))
             {
                 try
                 {
-                    formattedItems.Add(JsonSerializer.Deserialize<JsonElement>(formatted));
+                    formattedItems.Add(JsonSerializer.Deserialize(formatted, AppJsonContext.Default.JsonElement));
                     continue;
                 }
                 catch (JsonException)
@@ -464,12 +446,12 @@ public sealed class WebScraperService : IDisposable
         }
 
         // トップレベル構造を再構築
-        var resultDict = new Dictionary<string, object>();
+        var resultDict = new Dictionary<string, JsonElement>();
         foreach (var prop in root.EnumerateObject())
         {
             if (prop.Name == "content")
             {
-                resultDict["content"] = formattedItems;
+                resultDict["content"] = JsonSerializer.SerializeToElement(formattedItems, AppJsonContext.Default.ListJsonElement);
             }
             else
             {
@@ -477,7 +459,7 @@ public sealed class WebScraperService : IDisposable
             }
         }
 
-        return JsonSerializer.Serialize(resultDict, jsonOptions);
+        return JsonSerializer.Serialize(resultDict, AppJsonIndentedContext.Default.DictionaryStringJsonElement);
     }
 
     /// <summary>
@@ -485,27 +467,27 @@ public sealed class WebScraperService : IDisposable
     /// </summary>
     private async Task<string?> CallOllamaChatAsync(string systemPrompt, string userMessage, CancellationToken ct)
     {
-        var requestBody = new
+        var requestBody = new OllamaChatRequest
         {
-            model = _ollamaModel,
-            messages = new object[]
-            {
-                new { role = "system", content = systemPrompt },
-                new { role = "user", content = userMessage }
-            },
-            stream = false,
-            temperature = 0.1,
-            max_tokens = 16384
+            Model = _ollamaModel ?? "",
+            Messages =
+            [
+                new OllamaChatMessage { Role = "system", Content = systemPrompt },
+                new OllamaChatMessage { Role = "user", Content = userMessage }
+            ],
+            Stream = false,
+            Temperature = 0.1,
+            MaxTokens = 16384
         };
 
-        var requestJson = JsonSerializer.Serialize(requestBody);
+        var requestJson = JsonSerializer.Serialize(requestBody, AppJsonContext.Default.OllamaChatRequest);
         using var content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json");
 
         using var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/v1/chat/completions", content, ct);
         response.EnsureSuccessStatusCode();
 
         var responseJson = await response.Content.ReadAsStringAsync(ct);
-        var responseDoc = JsonSerializer.Deserialize<JsonElement>(responseJson);
+        var responseDoc = JsonSerializer.Deserialize(responseJson, AppJsonContext.Default.JsonElement);
 
         // OpenAI互換レスポンス: choices[0].message.content
         if (responseDoc.TryGetProperty("choices", out var choices) &&
@@ -794,7 +776,7 @@ public sealed class WebScraperService : IDisposable
         var body = await response.Content.ReadAsStringAsync(ct);
         _logMessage($"APIレスポンス取得完了なのだ (サイズ: {body.Length:#,0} bytes)");
 
-        var root = JsonSerializer.Deserialize<JsonElement>(body);
+        var root = JsonSerializer.Deserialize(body, AppJsonContext.Default.JsonElement);
         if (root.ValueKind != JsonValueKind.Array || root.GetArrayLength() < 2)
             throw new InvalidOperationException("予期しないReddit APIレスポンス形式です。");
 

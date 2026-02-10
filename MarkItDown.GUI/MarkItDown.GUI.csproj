@@ -6,15 +6,14 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
-    <Version>1.0.50</Version>
+    <Version>1.0.52</Version>
     <Authors>ゆろち</Authors>
     <Title>MarkItDown.GUI</Title>
     <ApplicationIcon>..\icon\app.ico</ApplicationIcon>
     <ImplicitUsings>enable</ImplicitUsings>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
-    <PublishSingleFile>true</PublishSingleFile>
+    <PublishAot>true</PublishAot>
     <SelfContained>true</SelfContained>
-    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
   </PropertyGroup>
 
@@ -23,10 +22,10 @@
     <PackageReference Include="Avalonia" Version="11.3.11" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.11" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.11" />
-    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.38" />
+    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.42" />
     <PackageReference Include="7z.Libs" Version="25.1.0" />
     <PackageReference Include="Velopack" Version="0.0.*" />
-    <PackageReference Include="ZLogger" Version="2.5.10" />
+    <PackageReference Include="NLog" Version="6.1.0" />
   </ItemGroup>
 
   <!-- Scriptsフォルダを出力ディレクトリにコピー -->
@@ -40,19 +39,6 @@
   <Target Name="GenerateIcon" BeforeTargets="BeforeBuild">
     <Message Text="アイコン生成スクリプトを実行中..." Importance="high" />
     <Exec Command="pwsh -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\icon\generate_icon.ps1&quot;" ContinueOnError="true" IgnoreExitCode="false" WorkingDirectory="$(MSBuildProjectDirectory)\..\icon" />
-  </Target>
-
-  <!-- 7z.dll を SingleFile バンドルに含めず exe の横に外部ファイルとして残す。
-       IncludeNativeLibrariesForSelfExtract=true だと全ネイティブDLLがバンドル内に含まれるが、
-       Cube.FileSystem.SevenZip は P/Invoke の LoadLibrary で直接ロードするため
-       ファイルシステム上にファイルが必要。 -->
-  <Target Name="Exclude7zDllFromSingleFile" AfterTargets="ComputeResolvedFilesToPublishList">
-    <ItemGroup>
-      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)" Condition="'%(Filename)' == '7z' AND '%(Extension)' == '.dll'">
-        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
-      </ResolvedFileToPublish>
-    </ItemGroup>
-    <Message Text="7z.dll を SingleFile バンドルから除外したのだ" Importance="high" />
   </Target>
 
   <!-- ビルド/パブリッシュ後に7z.dllをルートに配置 -->

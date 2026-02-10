@@ -1,13 +1,16 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Linq;
-using Microsoft.Extensions.Logging;
-using ZLogger;
-using ZLogger.Providers;
+using NLog;
+using NLog.Config;
+using NLog.Targets;
 
 namespace MarkItDown.GUI.Services;
 
-// EnumとOptionsはそのままでOK
+/// <summary>
+/// ログレベルを表す列挙型
+/// </summary>
 public enum LogLevel
 {
     Debug,
@@ -16,197 +19,235 @@ public enum LogLevel
     Error
 }
 
-public sealed class LoggerOptions
+/// <summary>
+/// ログ初期化設定
+/// </summary>
+public sealed class LoggerConfig
 {
-    public string AppName { get; set; } = "MarkItDown.GUI";
-    public string? LogDirectoryOverride { get; set; }
-    public int RollingSizeKb { get; set; } = 1024;
-    public int RollingMaxFiles { get; set; } = 1;
+    /// <summary>ログ出力ディレクトリ</summary>
+    public required string LogDirectory { get; init; }
+
+    /// <summary>ログファイル名のプレフィックス（例: "MarkItDown.GUI"）</summary>
+    public required string FilePrefix { get; init; }
+
+    /// <summary>ローリングサイズ上限（MB）</summary>
+    public int MaxSizeMB { get; init; } = 10;
+
+    /// <summary>アーカイブファイルの最大保持数</summary>
+    public int MaxArchiveFiles { get; init; } = 10;
+
+    /// <summary>ログファイルの保持日数（0以下の場合は削除しない）</summary>
+    public int RetentionDays { get; init; } = 7;
 }
 
+/// <summary>
+/// NLogを使用した汎用ログ出力クラス
+/// </summary>
 public static class Logger
 {
-    private static ILoggerFactory? _loggerFactory;
-    private static ILogger? _logger;
+    private static NLog.Logger? _logger;
+    private static bool _isConfigured;
     private static string _appName = "MarkItDown.GUI";
 
-    // 自前の MinLogLevel 判定は削除（ILoggerFactory側で制御するため）
+    /// <summary>
+    /// 最小ログレベル（これ以上のレベルのログのみ出力）
+    /// </summary>
+    private static readonly LogLevel MinLogLevel =
+#if DEBUG
+        LogLevel.Debug;
+#else
+        LogLevel.Warning;
+#endif
 
-    private static bool IsDebugRun
+    private static string GetDefaultLogDirectory()
     {
-        get
+        var baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        if (baseDir.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase))
         {
-            var baseDir = AppDomain.CurrentDomain.BaseDirectory;
-            return baseDir.Contains(@"\bin\Debug\", StringComparison.OrdinalIgnoreCase);
-        }
-    }
-
-    private static string GetLogDirectory(string appName)
-    {
-        if (IsDebugRun)
-        {
-            return AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+            return baseDir.TrimEnd('\\', '/');
         }
         return Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            appName);
-    }
-
-    public static void Initialize(LoggerOptions? options = null)
-    {
-        // 既に初期化済みなら何もしない（二重初期化防止）
-        if (_loggerFactory != null) return;
-
-        var opt = options ?? new LoggerOptions();
-        _appName = opt.AppName;
-        var logDirectory = opt.LogDirectoryOverride ?? GetLogDirectory(_appName);
-
-        try
-        {
-            if (!Directory.Exists(logDirectory))
-            {
-                Directory.CreateDirectory(logDirectory);
-            }
-        }
-        catch (Exception ex)
-        {
-            System.Diagnostics.Debug.WriteLine($"ログディレクトリの作成に失敗しました: {ex.Message}");
-        }
-
-        _loggerFactory = LoggerFactory.Create(logging =>
-        {
-            // ここでログレベルを制御
-#if DEBUG
-            logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Debug);
-#else
-            logging.SetMinimumLevel(Microsoft.Extensions.Logging.LogLevel.Warning);
-#endif
-
-            // テキスト形式のフォーマットを一括設定
-            // これにより、すべてのログに自動で [日付] [レベル] が付きます
-            logging.AddZLoggerRollingFile(options =>
-            {
-                options.FilePathSelector = (timestamp, sequenceNumber) =>
-                    Path.Combine(logDirectory, $"{_appName}_{timestamp.ToLocalTime():yyyyMMdd}_{sequenceNumber:000}.log");
-                options.RollingSizeKB = opt.RollingSizeKb;
-
-                // プレーンテキストフォーマッタを設定（ここでタイムスタンプ等の形式を決める）
-                options.UsePlainTextFormatter(formatter =>
-                {
-                    formatter.SetPrefixFormatter($"{0:yyyy-MM-dd HH:mm:ss.fff} | {1} | ", (in template, in info) => template.Format(info.Timestamp, info.LogLevel));
-                });
-            });
-
-            logging.AddZLoggerConsole(options =>
-            {
-                options.UsePlainTextFormatter(formatter =>
-                {
-                    formatter.SetPrefixFormatter($"{0:yyyy-MM-dd HH:mm:ss.fff} | {1} | ", (in template, in info) => template.Format(info.Timestamp, info.LogLevel));
-                });
-            });
-        });
-
-        _logger = _loggerFactory.CreateLogger(_appName);
-        _logger.LogInformation($"Logger initialized - Log directory: {logDirectory}");
-
-        CleanupOldLogFiles(logDirectory, opt.RollingMaxFiles);
-    }
-
-    public static void Log(string message, LogLevel level = LogLevel.Info)
-    {
-        // 初期化漏れガード（念のため）
-        if (_logger == null) Initialize();
-
-        // メッセージ生成済みの場合は標準のLogメソッドを使う（switch 文不要）
-        var msLevel = ToMsLogLevel(level);
-        _logger!.Log(msLevel, message);
-    }
-
-    public static void LogLines(string[] messages, LogLevel level = LogLevel.Info)
-    {
-        if (messages is null || messages.Length == 0) return;
-        if (_logger == null) Initialize();
-
-        var msLevel = ToMsLogLevel(level);
-        foreach (var message in messages)
-        {
-            _logger!.Log(msLevel, message);
-        }
-    }
-
-    public static void LogException(string message, Exception exception)
-    {
-        if (_logger == null) Initialize();
-
-        // Errorレベルで例外付きログを出力
-        _logger!.LogError(exception, message);
-    }
-
-    public static void LogStartup(string[] args)
-    {
-        if (_logger == null) Initialize();
-
-        var argsLines = args.Length > 0
-            ? string.Join(Environment.NewLine, args.Select((a, i) => $"  [{i}]: {a}"))
-            : "  (none)";
-
-        // ここは ZLogger の補間文字列構文を使ってもOK（インライン生成なので）
-        // ただし、統一感を出すために標準Logメソッドでも可
-        _logger!.LogDebug($"""
-            === {_appName} 起動ログ ===
-            実行ファイルパス: {Environment.ProcessPath}
-            引数 ({args.Length}):
-            {argsLines}
-            """);
-    }
-
-    public static void Dispose()
-    {
-        _loggerFactory?.Dispose();
-        _loggerFactory = null;
-        _logger = null;
+            _appName);
     }
 
     /// <summary>
-    /// 古いログファイルを削除し、最新の maxFiles 件のみ残す
+    /// デフォルト設定でロガーを初期化する
     /// </summary>
-    private static void CleanupOldLogFiles(string logDirectory, int maxFiles)
+    public static void Initialize()
     {
+        Initialize(new LoggerConfig
+        {
+            LogDirectory = GetDefaultLogDirectory(),
+            FilePrefix = _appName
+        });
+    }
+
+    /// <summary>
+    /// ロガーを初期化する
+    /// </summary>
+    /// <param name="config">ログ設定</param>
+    public static void Initialize(LoggerConfig config)
+    {
+        if (_isConfigured) return;
+
+        _appName = config.FilePrefix;
+
+        if (!Directory.Exists(config.LogDirectory))
+        {
+            Directory.CreateDirectory(config.LogDirectory);
+        }
+
+        var nlogConfig = new LoggingConfiguration();
+
+        var fileTarget = new FileTarget("file")
+        {
+            FileName = Path.Combine(config.LogDirectory, $"{config.FilePrefix}_${{date:format=yyyyMMdd}}.log"),
+            ArchiveAboveSize = config.MaxSizeMB * 1024 * 1024,
+            ArchiveFileName = Path.Combine(config.LogDirectory, $"{config.FilePrefix}_${{date:format=yyyyMMdd}}_{{##}}.log"),
+            MaxArchiveFiles = config.MaxArchiveFiles,
+            Layout = "${longdate} [${uppercase:${level}}] ${message}${onexception:inner=${newline}${exception:format=tostring}}",
+            Encoding = System.Text.Encoding.UTF8
+        };
+
+        var consoleTarget = new ConsoleTarget("console")
+        {
+            Layout = "${longdate} [${uppercase:${level}}] ${message}${onexception:inner=${newline}${exception:format=tostring}}"
+        };
+
+        nlogConfig.AddTarget(fileTarget);
+        nlogConfig.AddTarget(consoleTarget);
+
+        nlogConfig.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, fileTarget);
+        nlogConfig.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, consoleTarget);
+
+        LogManager.Configuration = nlogConfig;
+        _logger = LogManager.GetLogger(config.FilePrefix);
+        _isConfigured = true;
+
+        Log("Logger initialized with NLog (RollingFile)", LogLevel.Debug);
+
+        // 保持期間を超えた古いログファイルを削除
+        CleanupOldLogFiles(config.LogDirectory, config.FilePrefix, config.RetentionDays);
+    }
+
+    /// <summary>
+    /// ログを出力する
+    /// </summary>
+    /// <param name="message">ログメッセージ</param>
+    /// <param name="level">ログレベル（デフォルト: Info）</param>
+    public static void Log(string message, LogLevel level = LogLevel.Info)
+    {
+        if (level < MinLogLevel)
+            return;
+
+        _logger?.Log(ToNLogLevel(level), message);
+    }
+
+    /// <summary>
+    /// 複数行のログを出力する
+    /// </summary>
+    /// <param name="messages">ログメッセージの配列</param>
+    /// <param name="level">ログレベル（デフォルト: Info）</param>
+    public static void LogLines(string[] messages, LogLevel level = LogLevel.Info)
+    {
+        if (messages == null || messages.Length == 0) return;
+        if (level < MinLogLevel) return;
+
+        var nlogLevel = ToNLogLevel(level);
+        foreach (var message in messages)
+        {
+            _logger?.Log(nlogLevel, message);
+        }
+    }
+
+    /// <summary>
+    /// 例外情報を含むログを出力する（常にErrorレベル）
+    /// </summary>
+    /// <param name="message">ログメッセージ</param>
+    /// <param name="exception">例外オブジェクト</param>
+    public static void LogException(string message, Exception exception)
+    {
+        _logger?.Error(exception, message);
+    }
+
+    /// <summary>
+    /// アプリケーション起動時のログを出力する（Debugレベル）
+    /// </summary>
+    /// <param name="args">コマンドライン引数</param>
+    public static void LogStartup(string[] args)
+    {
+        if (LogLevel.Debug < MinLogLevel) return;
+
+        _logger?.Debug(
+            $"""
+            === {_appName} 起動ログ ===
+            起動時刻: {DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}
+            実行ファイルパス: {Environment.ProcessPath}
+            コマンドライン引数の数: {args.Length}
+            コマンドライン引数:
+            {string.Join(Environment.NewLine, args.Select((a, i) => $"  [{i}]: {a}"))}
+            """);
+    }
+
+    /// <summary>
+    /// ロガーを明示的に終了する（バッファのフラッシュなど）
+    /// </summary>
+    public static void Dispose()
+    {
+        LogManager.Shutdown();
+        _isConfigured = false;
+    }
+
+    /// <summary>
+    /// 保持期間を超えた古いログファイルを削除する
+    /// </summary>
+    private static void CleanupOldLogFiles(string logDirectory, string filePrefix, int retentionDays)
+    {
+        if (retentionDays <= 0) return;
+
         try
         {
-            var logFiles = Directory.GetFiles(logDirectory, $"{_appName}_*.log")
-                .OrderByDescending(f => f)
-                .Skip(maxFiles)
-                .ToArray();
+            var cutoffDate = DateTime.Now.Date.AddDays(-retentionDays);
+            var logFiles = Directory.GetFiles(logDirectory, $"{filePrefix}_*.log");
 
             foreach (var file in logFiles)
             {
                 try
                 {
-                    File.Delete(file);
+                    var fileName = Path.GetFileNameWithoutExtension(file);
+                    var parts = fileName.Split('_');
+                    if (parts.Length >= 2 && parts[1].Length == 8 &&
+                        DateTime.TryParseExact(parts[1], "yyyyMMdd", null, DateTimeStyles.None, out var fileDate))
+                    {
+                        if (fileDate < cutoffDate)
+                        {
+                            File.Delete(file);
+                            Log($"古いログファイルを削除しました: {Path.GetFileName(file)}", LogLevel.Debug);
+                        }
+                    }
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // 使用中のファイルは削除できない場合がある
+                    Log($"ログファイルの削除に失敗しました: {Path.GetFileName(file)} - {ex.Message}", LogLevel.Warning);
                 }
             }
         }
-        catch
+        catch (Exception ex)
         {
-            // ログクリーンアップ失敗は無視
+            Log($"ログファイルのクリーンアップ中にエラーが発生しました: {ex.Message}", LogLevel.Warning);
         }
     }
 
-    // 自前EnumをMS標準Enumに変換するヘルパー
-    private static Microsoft.Extensions.Logging.LogLevel ToMsLogLevel(LogLevel level)
+    /// <summary>
+    /// 独自LogLevelをNLogのLogLevelに変換
+    /// </summary>
+    private static NLog.LogLevel ToNLogLevel(LogLevel level) => level switch
     {
-        return level switch
-        {
-            LogLevel.Debug => Microsoft.Extensions.Logging.LogLevel.Debug,
-            LogLevel.Info => Microsoft.Extensions.Logging.LogLevel.Information,
-            LogLevel.Warning => Microsoft.Extensions.Logging.LogLevel.Warning,
-            LogLevel.Error => Microsoft.Extensions.Logging.LogLevel.Error,
-            _ => Microsoft.Extensions.Logging.LogLevel.Information
-        };
-    }
+        LogLevel.Debug => NLog.LogLevel.Debug,
+        LogLevel.Info => NLog.LogLevel.Info,
+        LogLevel.Warning => NLog.LogLevel.Warn,
+        LogLevel.Error => NLog.LogLevel.Error,
+        _ => NLog.LogLevel.Info
+    };
 }

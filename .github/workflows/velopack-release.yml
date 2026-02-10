@@ -53,7 +53,8 @@ jobs:
             --packVersion $env:VPK_VERSION `
             --packDir artifacts/publish `
             --mainExe MarkItDown.GUI.exe `
-            --outputDir artifacts/releases
+            --outputDir artifacts/releases `
+            --shortcuts "StartMenu,Desktop"
 
       - name: GitHub Releases へアップロード
         shell: pwsh
@@ -61,9 +62,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $repoUrl = "https://github.com/${{ github.repository }}"
+          $releaseName = "MarkItDown.GUI $env:VPK_VERSION"
           vpk upload github `
             --repoUrl $repoUrl `
             --outputDir artifacts/releases `
-            --tag v$env:VPK_VERSION `
+            --channel win `
             --publish `
+            --releaseName $releaseName `
             --token $env:GITHUB_TOKEN

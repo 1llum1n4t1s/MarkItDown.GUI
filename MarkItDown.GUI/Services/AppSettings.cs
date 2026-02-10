@@ -44,22 +44,58 @@ public class AppSettings
     }
 
     /// <summary>
-    /// Get update feed URL from configuration
+    /// 自動更新用のGitHubオーナー名を取得する
     /// </summary>
-    public static string GetUpdateFeedUrl()
+    public static string GetUpdateRepoOwner()
     {
         lock (_lock)
         {
             try
             {
-                var url = _settingsDocument?.Root?.Element("UpdateFeedUrl")?.Value;
-                return !string.IsNullOrEmpty(url)
-                    ? url
-                    : GetDefaultUpdateFeedUrl();
+                var value = _settingsDocument?.Root?.Element("UpdateRepoOwner")?.Value;
+                return !string.IsNullOrEmpty(value) ? value : "1llum1n4t1s";
             }
             catch
             {
-                return GetDefaultUpdateFeedUrl();
+                return "1llum1n4t1s";
+            }
+        }
+    }
+
+    /// <summary>
+    /// 自動更新用のGitHubリポジトリ名を取得する
+    /// </summary>
+    public static string GetUpdateRepoName()
+    {
+        lock (_lock)
+        {
+            try
+            {
+                var value = _settingsDocument?.Root?.Element("UpdateRepoName")?.Value;
+                return !string.IsNullOrEmpty(value) ? value : "MarkItDown.GUI";
+            }
+            catch
+            {
+                return "MarkItDown.GUI";
+            }
+        }
+    }
+
+    /// <summary>
+    /// 自動更新用のチャンネル名を取得する
+    /// </summary>
+    public static string GetUpdateChannel()
+    {
+        lock (_lock)
+        {
+            try
+            {
+                var value = _settingsDocument?.Root?.Element("UpdateChannel")?.Value;
+                return !string.IsNullOrEmpty(value) ? value : "release";
+            }
+            catch
+            {
+                return "release";
             }
         }
     }
@@ -187,14 +223,6 @@ public class AppSettings
     }
 
     /// <summary>
-    /// Get the default update feed URL (GitHub releases)
-    /// </summary>
-    private static string GetDefaultUpdateFeedUrl()
-    {
-        return "https://github.com/1llum1n4t1s/MarkItDown.GUI/releases/latest/download";
-    }
-
-    /// <summary>
     /// Create default settings file
     /// </summary>
     private static void CreateDefaultSettings()
@@ -202,7 +230,9 @@ public class AppSettings
         try
         {
             var root = new XElement("AppSettings",
-                new XElement("UpdateFeedUrl", GetDefaultUpdateFeedUrl()),
+                new XElement("UpdateRepoOwner", "1llum1n4t1s"),
+                new XElement("UpdateRepoName", "MarkItDown.GUI"),
+                new XElement("UpdateChannel", "release"),
                 new XElement("PythonVersion", ""),
                 new XElement("OllamaUrl", "http://localhost:11434")
             );
