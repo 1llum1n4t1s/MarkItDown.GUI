@@ -12,15 +12,14 @@
 - **Webスクレイピング**: URLを入力するだけでWebページの内容をJSON形式で抽出・保存
   - Reddit: JSON API による高速取得
   - X/Twitter: ユーザーのタイムライン全件取得＋画像オリジナル画質ダウンロード（セッション永続化対応）
-  - その他のサイト: HTTP + Ollamaガイド型でブラウザを起動せずに高速取得（ページネーション対応）
-- **自動環境構築**: Python環境、FFmpeg、Ollamaを初回起動時に自動でダウンロード・セットアップ
-- **OSの環境を汚さないポータブル設計**: Python・FFmpeg・Ollama・LLMモデルなど全ての依存コンポーネントをアプリ内の `lib/` フォルダに格納。システムのPATH・レジストリ・既存のPython環境には一切影響しません。アンインストール時もフォルダ削除だけで完全にクリーンアップできます
-- **Ollama連携 (gemma3:4b)**: ローカルLLM を使用した画像説明の自動生成、Markdown整形・まとめ、スクレイピング戦略分析を統合
-- **3種類のファイル出力**: 元データ・整形済・まとめ済の3ファイルを自動生成（Ollama利用時。元データとの比較で整形による情報損失をチェック可能）
+  - その他のサイト: HTTP + Claudeガイド型でブラウザを起動せずに高速取得（ページネーション対応）
+- **自動環境構築**: Python環境、FFmpegを初回起動時に自動でダウンロード・セットアップ
+- **OSの環境を汚さないポータブル設計**: Python・FFmpeg・Node.js・Claude Code CLIなど全ての依存コンポーネントをアプリ内の `lib/` フォルダに格納。システムのPATH・レジストリ・既存のPython環境には一切影響しません。アンインストール時もフォルダ削除だけで完全にクリーンアップできます
+- **Claude AI連携（オプション）**: Claude Code CLIを使用したMarkdown整形・まとめ、スクレイピング戦略分析を統合。メイン画面のラジオボタンでON/OFF切替可能（デフォルトOFF）
+- **3種類のファイル出力**: 元データ・整形済・まとめ済の3ファイルを自動生成（Claude利用時。元データとの比較で整形による情報損失をチェック可能）
 - **並列処理**: 最大3ファイルの同時変換で高速処理
 - **重複処理の回避**: 同じファイルの再処理をキャッシュでスキップ
-- **GPUアクセラレーション**: NVIDIA（CUDA）、AMD（ROCm）、Intel（Vulkan）GPUを自動検出・活用してLLM推論を高速化
-- **パッケージ自動更新**: 起動時にPythonパッケージ（markitdown、openai、playwright、httpx）の最新バージョンを自動確認・更新
+- **パッケージ自動更新**: 起動時にPythonパッケージ（markitdown、playwright、httpx）の最新バージョンを自動確認・更新
 - **自動アップデート**: アプリ起動時に最新版を自動チェック・適用
 - **モダンなUI**: Avalonia UIを使用した軽量で使いやすいインターフェース（処理中オーバーレイによる進捗表示付き）
 
@@ -58,19 +57,20 @@
 
 ### ファイル変換
 
-1. アプリケーションを起動します（初回はPython環境・FFmpeg・Ollamaの自動セットアップが行われます）
-2. 変換したいファイルまたはフォルダをウィンドウにドラッグ&ドロップします
-3. 自動的に変換が開始され、元のファイルと同じ場所にMarkdownファイル（`.md`）が生成されます
+1. アプリケーションを起動します（初回はPython環境・FFmpegの自動セットアップが行われます）
+2. Claude AIを使用する場合は、メイン画面の「Claude AI」ラジオボタンを「使用する」に切り替えます（Node.js・Claude Code CLIの自動セットアップと認証が実行されます）
+3. 変換したいファイルまたはフォルダをウィンドウにドラッグ&ドロップします
+4. 自動的に変換が開始され、元のファイルと同じ場所にMarkdownファイル（`.md`）が生成されます
 
 #### 出力ファイル
 
-Ollama利用可能時は以下の3ファイルが出力されます（Ollama未設定時は元データのみ）：
+Claude利用可能時は以下の3ファイルが出力されます（Claude未使用時は元データのみ）：
 
 | 種別 | ファイル名 | 内容 |
 |---|---|---|
 | 元データ | `ファイル名_元データ_YYYYMMDDHHmmss.md` | MarkItDown変換後の生データ |
-| 整形済 | `ファイル名_整形済_YYYYMMDDHHmmss.md` | Ollamaで書式を整形したデータ |
-| まとめ済 | `ファイル名_まとめ済_YYYYMMDDHHmmss.md` | Ollamaでまとめたデータ |
+| 整形済 | `ファイル名_整形済_YYYYMMDDHHmmss.md` | Claudeで書式を整形したデータ |
+| まとめ済 | `ファイル名_まとめ済_YYYYMMDDHHmmss.md` | Claudeでまとめたデータ |
 
 フォルダをドロップした場合は、フォルダ内のサポート対象ファイルを再帰的に検索し、最大3ファイルずつ並列で変換します。
 
@@ -82,15 +82,15 @@ Ollama利用可能時は以下の3ファイルが出力されます（Ollama未�
 
 #### 出力ファイル
 
-Ollama利用可能時は以下の3ファイルが出力されます（Ollama未設定時は元データのみ）：
+Claude利用可能時は以下の3ファイルが出力されます（Claude未使用時は元データのみ）：
 
 | 種別 | ファイル名 | 内容 |
 |---|---|---|
 | 元データ | `ファイル名_元データ_YYYYMMDDHHmmss.json` | スクレイピング結果の生JSON |
-| 整形済 | `ファイル名_整形済_YYYYMMDDHHmmss.json` | Ollamaで構造化・整形したJSON |
-| まとめ済 | `ファイル名_まとめ済_YYYYMMDDHHmmss.md` | OllamaでまとめたMarkdown |
+| 整形済 | `ファイル名_整形済_YYYYMMDDHHmmss.json` | Claudeで構造化・整形したJSON |
+| まとめ済 | `ファイル名_まとめ済_YYYYMMDDHHmmss.md` | ClaudeでまとめたMarkdown |
 
-処理中はオーバーレイに現在の進行状況（依存パッケージ確認 → スクレイピング → Ollama JSON整形 → Ollamaまとめ）がリアルタイムで表示されます。
+処理中はオーバーレイに現在の進行状況（依存パッケージ確認 → スクレイピング → Claude JSON整形 → Claudeまとめ）がリアルタイムで表示されます。
 
 #### 対応サイト
 
@@ -98,7 +98,7 @@ Ollama利用可能時は以下の3ファイルが出力されます（Ollama未�
 |---|---|---|
 | Reddit | JSON API | 投稿・コメントを高速取得 |
 | X/Twitter | Playwright（専用スクリプト） | ユーザータイムライン全件取得、画像オリジナル画質DL、セッション永続化 |
-| その他 | HTTP + Ollama | ブラウザ不使用、HTTPで高速取得（ページネーション対応） |
+| その他 | HTTP + Claude | ブラウザ不使用、HTTPで高速取得（ページネーション対応） |
 
 #### X/Twitter スクレイピング
 
@@ -116,7 +116,7 @@ X/Twitter のユーザーページURL（例: `x.com/username`）を入力する�
 3. ログインが検出されると自動的にスクレイピングが開始されます
 4. セッション情報は `lib/playwright/x_profile/` に保存され、次回以降は自動ログインされます
 
-> **注意**: X/Twitterのデータは大量になるため、Ollama整形・まとめ処理はスキップされます。元データ（JSON）のみ出力されます。
+> **注意**: X/Twitterのデータは大量になるため、Claude整形・まとめ処理はスキップされます。元データ（JSON）のみ出力されます。
 
 **出力ファイル：**
 
@@ -125,54 +125,38 @@ X/Twitter のユーザーページURL（例: `x.com/username`）を入力する�
 | `{username}_元データ_YYYYMMDDHHmmss.json` | 全ツイートのJSON（テキスト・メトリクス・画像情報） |
 | `{username}/` フォルダ | ダウンロードされた画像ファイル群 |
 
-#### Ollamaガイド型スクレイピング（HTTPベース）
+#### Claudeガイド型スクレイピング（HTTPベース）
 
-HTTP（requests + BeautifulSoup）とOllama（ローカルLLM）を組み合わせて、ブラウザを起動せずにWebページを取得・解析します：
+HTTP（requests + BeautifulSoup）とClaude（Claude Code CLI）を組み合わせて、ブラウザを起動せずにWebページを取得・解析します：
 
 - ページ構造のDOM統計分析（タグ出現数、class名頻度、ID一覧）
-- OllamaによるCSS セレクタと抽出戦略の動的決定
+- ClaudeによるCSSセレクタと抽出戦略の動的決定
 - 戦略ベースのコンテンツ抽出（リスト・記事・汎用ページに対応）
 - ページネーション（「次へ」リンクの自動検出・追跡）
 - メタデータ・JSON-LD構造化データの抽出
 
-OllamaのOpenAI互換チャットAPI（`/v1/chat/completions`）を使用して、HTMLの構造を分析し最適なスクレイピング戦略を決定します。ブラウザを使わないため起動が高速で、リソース消費も軽量です。
+Claude Code CLI（`node cli.js -p "<prompt>"`）を使用して、HTMLの構造を分析し最適なスクレイピング戦略を決定します。ブラウザを使わないため起動が高速で、リソース消費も軽量です。
 
 > **注意**: JavaScriptで動的にレンダリングされるコンテンツ（SPAサイト等）は取得できない場合があります。X/Twitterのスクレイピングでは従来通りPlaywright（ブラウザ）が使用されます。
 
-## Ollama連携機能（自動セットアップ）
+## Claude AI連携機能（オプション）
 
-Ollamaと **gemma3:4b**（Google製マルチモーダルモデル）を使用して、以下のLLM連携機能を提供します。
+Claude Code CLI を使用して、以下のAI連携機能を提供します。**デフォルトはOFFで、メイン画面のラジオボタンで有効化できます。**
 
-- **画像説明の自動生成**: 画像ファイルをドロップすると、MarkItDownのネイティブLLM統合により画像の説明文を日本語で自動生成します
-- **Markdown整形**: 全ファイル形式の変換結果を、Ollamaで自動的にきれいなMarkdown形式に整形します（元データは別ファイルで保持）
-- **自動まとめ**: 変換結果・スクレイピング結果をOllamaで自動分析・まとめし、Markdownファイルとして出力します
-- **スクレイピング戦略分析**: Webスクレイピング時にページ構造（DOM統計、HTMLサンプル、スクリーンショット）を分析し、最適なCSSセレクタと抽出戦略を動的に決定します
+- **Markdown整形**: 全ファイル形式の変換結果を、Claudeで自動的にきれいなMarkdown形式に整形します（元データは別ファイルで保持）
+- **自動まとめ**: 変換結果・スクレイピング結果をClaudeで自動分析・まとめし、Markdownファイルとして出力します
+- **スクレイピング戦略分析**: Webスクレイピング時にページ構造（DOM統計、HTMLサンプル）を分析し、最適なCSSセレクタと抽出戦略を動的に決定します
 - **スクレイピングJSON整形**: Webスクレイピング結果のJSONを構造化・整形します（大きなJSONはチャンク分割で処理）
 
-> **使用モデル**: `gemma3:4b` はアプリ内部で固定されており、設定変更は不要です。テキストと画像の両方を理解できるマルチモーダルモデルで、約3.3GBのディスク容量を使用します。
+### 有効化方法
 
-### 自動セットアップ
+1. メイン画面の「Claude AI」ラジオボタンを「使用する」に切り替えます
+2. Node.js（v20.18.1）が自動的にダウンロード・展開されます
+3. Claude Code CLI（`@anthropic-ai/claude-code`）がnpmで自動インストールされます
+4. ブラウザベースのOAuth認証画面が開きます（初回のみ）
+5. 認証完了後、接続検証が行われ、AI機能が利用可能になります
 
-**初回起動時に自動的に実行されます：**
-
-1. **Ollamaの自動ダウンロード**
-   - アプリケーション起動時、Ollamaが組み込まれていない場合は自動的にダウンロードされます
-   - GitHubから最新版のOllama for Windowsを取得します
-   - ダウンロード先: `lib/ollama/` フォルダ
-
-2. **Ollamaサーバーの自動起動**
-   - ダウンロード完了後、バックグラウンドでOllamaサーバーを起動します
-   - `http://localhost:11434` で待機します
-
-3. **gemma3:4bモデルの自動ダウンロード**
-   - `gemma3:4b` モデルが存在しない場合、自動的にダウンロードを開始します
-   - 初回は約3.3GBのダウンロードが発生します
-   - ダウンロード中もログに進捗が表示されます
-
-4. **完了**
-   - ログに「Ollamaが利用可能です」と表示されれば準備完了です
-   - 画像ファイルをドロップすると、自動的に説明が生成されます
-   - ファイルをドロップすると、元データ・整形済・まとめ済の3ファイルが自動生成されます
+> **設定の保存**: Claude AI の使用設定は `appsettings.xml` に保存され、次回起動時に復元されます。前回ONで終了した場合は、起動時に自動的にセットアップが実行されます。
 
 ### 設定のカスタマイズ
 
@@ -180,45 +164,20 @@ Ollamaと **gemma3:4b**（Google製マルチモーダルモデル）を使用し
 
 ```xml
 <AppSettings>
-  <OllamaUrl>http://localhost:11434</OllamaUrl>
-  <OllamaGpuDevice>0</OllamaGpuDevice>
+  <UseClaudeAI>false</UseClaudeAI>
 </AppSettings>
 ```
 
 | 設定項目 | 説明 | デフォルト値 |
 |---|---|---|
-| `OllamaUrl` | OllamaサーバーのエンドポイントURL | `http://localhost:11434` |
-| `OllamaGpuDevice` | 使用するGPUデバイスID | `0`（自動検出） |
-
-#### GPU設定（OllamaGpuDevice）
-
-Ollamaは以下の優先順位でGPUバックエンドを自動検出します：
-
-1. **CUDA**（NVIDIA GPU）— 最優先
-2. **ROCm**（AMD GPU）
-3. **Vulkan**（Intel / AMD GPU）— フォールバック
-
-アプリはVulkanバックエンドを自動的に有効化（`OLLAMA_VULKAN=1`）し、全モデルレイヤーをGPUにオフロード（`OLLAMA_NUM_GPU=999`）します。NVIDIA GPUが利用可能な場合はCUDAが自動的に優先されます。
-
-使用するGPUを指定できます：
-
-- **未設定または`0`** (デフォルト): Ollamaが自動でGPUを検出して使用（推奨）
-- **`1`**: GPU 1のみを使用
-- **`0,1`**: GPU 0と1の両方を使用
-- **`-1`**: CPUのみ使用（GPUを使用しない）
-
-`CUDA_VISIBLE_DEVICES`を設定すると環境によってはGPUが検出されない場合があるため、デフォルトでは未設定（自動検出）にしています。複数GPUで特定のGPUを使いたい場合のみ設定してください。
-
-**GPU IDの確認方法:**
-コマンドプロンプトで `nvidia-smi -L`（NVIDIA）を実行すると、利用可能なGPUのリストが表示されます。
+| `UseClaudeAI` | Claude AIを使用するかどうか | `false` |
 
 ### 注意事項
 
-- **初回起動時の所要時間**: Ollamaとgemma3:4bモデルのダウンロードに10～30分程度かかる場合があります（ネットワーク速度に依存）
-- **ディスク容量**: Ollama本体（約200MB）+ gemma3:4bモデル（約3.3GB）が必要です
-- **メモリ要件**: モデル実行時に8GB以上のRAMを推奨します
-- Ollamaのダウンロードに失敗した場合でも、画像ファイルの基本情報（ファイル名、サイズなど）は出力されます
-- 画像説明の生成には数秒～数十秒かかる場合があります（初回のモデルロード時はさらに時間がかかります）
+- **認証**: Claude Code CLIのOAuth認証にはAnthropicアカウントが必要です
+- **ネットワーク**: Claude AIはクラウドベースのため、インターネット接続が必要です
+- **初回セットアップ**: Node.jsとClaude Code CLIのダウンロードに数分かかる場合があります
+- Claude AIが無効でも、ファイル変換やWebスクレイピングの基本機能は正常に動作します
 
 ## 自動環境構築
 
@@ -228,9 +187,9 @@ Ollamaは以下の優先順位でGPUバックエンドを自動検出します�
 |---|---|---|
 | 埋め込みPython 3.10+ | MarkItDownライブラリの実行環境 | `lib/python/python-embed/` |
 | FFmpeg | 音声ファイルの処理 | `lib/ffmpeg/` |
-| Ollama | LLM推論エンジン（gemma3:4b） | `lib/ollama/` |
+| Node.js v20.18.1 | Claude Code CLIの実行環境（Claude有効時） | `lib/nodejs/` |
+| Claude Code CLI | AI連携機能（Claude有効時） | `lib/npm/node_modules/` |
 | markitdown（最新版） | ファイル変換ライブラリ（pip自動インストール・更新） | Python site-packages |
-| openai | OllamaのOpenAI互換API利用（pip自動インストール・更新） | Python site-packages |
 | playwright | Webスクレイピング用ブラウザ自動化（pip自動インストール・更新） | Python site-packages |
 | httpx | X/Twitter画像ダウンロード用HTTPクライアント（pip自動インストール・更新） | Python site-packages |
 
@@ -239,9 +198,9 @@ Ollamaは以下の優先順位でGPUバックエンドを自動検出します�
 全ての依存コンポーネントはアプリケーションフォルダ内の `lib/` 配下に自己完結して格納されます。
 
 - **Python**: 公式の埋め込み版（Windows Embeddable Package）を使用。システムにインストール済みのPython環境には一切干渉しません
-- **Pythonパッケージ**: markitdown、openai、playwright、httpx等は埋め込みPython専用の site-packages にインストールされます
+- **Pythonパッケージ**: markitdown、playwright、httpx等は埋め込みPython専用の site-packages にインストールされます
 - **FFmpeg**: `lib/ffmpeg/` に格納。システムのPATHやレジストリは変更しません
-- **Ollama & LLMモデル**: `lib/ollama/` に格納。システムにインストールされたOllamaとは独立して動作します
+- **Node.js & Claude Code CLI**: `lib/nodejs/` および `lib/npm/` に格納。システムにインストールされたNode.jsとは独立して動作します
 
 アンインストール時はアプリケーションフォルダを削除するだけで、OS上に痕跡を残しません。
 
@@ -260,10 +219,8 @@ Ollamaは以下の優先順位でGPUバックエンドを自動検出します�
 - **言語**: C# 14 / Python 3.10+
 - **アーキテクチャ**: MVVM (Model-View-ViewModel)
 - **ファイル変換**: Microsoft MarkItDown（Python）
-- **LLMモデル**: gemma3:4b（Google製マルチモーダルモデル、アプリ内部固定）
-- **Webスクレイピング**: HTTP + BeautifulSoup + Ollama（構造分析）による汎用スクレイピング、X/Twitter専用Playwrightスクレイパー
-- **GPU対応**: CUDA（NVIDIA）/ ROCm（AMD）/ Vulkan（Intel・AMD）を自動検出
-- **LLM連携**: Ollama OpenAI互換API (`/v1/chat/completions`)
+- **AI連携**: Claude Code CLI（`@anthropic-ai/claude-code`） via Node.js — オプション
+- **Webスクレイピング**: HTTP + BeautifulSoup + Claude（構造分析）による汎用スクレイピング、X/Twitter専用Playwrightスクレイパー
 - **自動更新**: Velopack
 - **ログ**: ZLogger（ローリングファイル出力）
 

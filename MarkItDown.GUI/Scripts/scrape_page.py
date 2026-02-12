@@ -1,20 +1,19 @@
 """
-Playwright + Ollama を使用した AI ガイド型 Web スクレイピングスクリプト。
+Playwright + Claude Code CLI を使用した AI ガイド型 Web スクレイピングスクリプト。
 
-Ollama にページ構造を分析させ、最適な CSS セレクタと抽出戦略を
+Claude Code CLI にページ構造を分析させ、最適な CSS セレクタと抽出戦略を
 動的に決定してスクレイピングを行う。
 
 Usage:
     python scrape_page.py <url> <output_path>
 
 環境変数:
-    OLLAMA_URL   - Ollama の API エンドポイント (例: http://localhost:11434)
-    OLLAMA_MODEL - 使用するモデル名 (例: gemma3:4b)
+    CLAUDE_NODE_PATH - Node.js の実行パス
+    CLAUDE_CLI_PATH  - Claude Code CLI の実行パス
 
 出力: JSON形式のページデータ
 """
 
-import base64
 import json
 import os
 import re
@@ -24,11 +23,6 @@ import threading
 import time
 import traceback
 from urllib.parse import urljoin, urlparse
-
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
 
 try:
     from playwright.sync_api import sync_playwright
@@ -67,12 +61,12 @@ def check_playwright_browsers() -> bool:
 
 
 # ────────────────────────────────────────────
-#  Ollama ページ分析・戦略生成
+#  Claude Code CLI ページ分析・戦略生成
 # ────────────────────────────────────────────
 
 def get_page_summary(page, url: str) -> dict:
     """
-    ページ構造のサマリーを生成する（Ollama に送信するためのコンパクトな情報）。
+    ページ構造のサマリーを生成する（Claude に送信するためのコンパクトな情報）。
     HTMLそのものは大きすぎるため、DOM統計とサンプルを送る。
     """
     summary = {
@@ -148,118 +142,38 @@ def get_page_summary(page, url: str) -> dict:
     return summary
 
 
-MULTIMODAL_MODELS = {"gemma3"}
-
-def _is_multimodal_model(model_name: str) -> bool:
-    """モデル名がマルチモーダル（画像入力対応）モデルかどうかを判定する。"""
-    name = model_name.lower()
-    return any(m in name for m in MULTIMODAL_MODELS)
-
-def capture_page_screenshot(page, ollama_model: str) -> str | None:
-    """マルチモーダルモデル用にスクリーンショットを取得し、JPEG圧縮+リサイズしてbase64で返す"""
-    if not _is_multimodal_model(ollama_model):
+def claude_call(prompt, stdin_text=""):
+    """Claude Code CLI を呼び出してレスポンスを取得する"""
+    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
+    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
+    if not node_path or not cli_path:
         return None
-
     try:
-        # JPEG品質50で撮影し、データサイズを大幅に削減
-        screenshot_bytes = page.screenshot(
-            full_page=False,
-            type="jpeg",
-            quality=50,
-            scale="css",          # デバイスピクセル比を無視して CSS ピクセルで撮影
+        env = {**os.environ, "CI": "true"}
+        result = subprocess.run(
+            [node_path, cli_path, "-p", prompt],
+            input=stdin_text, capture_output=True, text=True,
+            timeout=300, env=env
         )
-        log(f"スクリーンショット取得完了 ({len(screenshot_bytes)} bytes)")
-        b64 = base64.b64encode(screenshot_bytes).decode("utf-8")
-        return b64
+        if result.returncode == 0:
+            return result.stdout.strip()
+        else:
+            log(f"Claude CLI エラー (exit {result.returncode}): {result.stderr[:200]}")
+            return None
+    except subprocess.TimeoutExpired:
+        log("Claude CLI がタイムアウトしました")
+        return None
     except Exception as e:
-        log(f"スクリーンショット取得エラー: {e}")
+        log(f"Claude CLI 呼び出しエラー: {e}")
         return None
 
 
-def _build_messages(prompt: str, screenshot_b64: str | None, ollama_model: str) -> list:
-    """Ollama に送るメッセージリストを構築する"""
-    messages = [
-        {
-            "role": "system",
-            "content": (
-                "あなたはWeb スクレイピングの専門家です。"
-                "与えられた Web ページの構造情報を分析し、最適なスクレイピング戦略を JSON で返してください。"
-                "出力は JSON のみにしてください。説明文やマークダウンは不要です。"
-            ),
-        },
-        {
-            "role": "user",
-            "content": prompt,
-        },
-    ]
-
-    # マルチモーダルモデルの場合はスクリーンショットも送信
-    if screenshot_b64 and _is_multimodal_model(ollama_model):
-        messages[-1] = {
-            "role": "user",
-            "content": [
-                {"type": "text", "text": prompt},
-                {
-                    "type": "image_url",
-                    "image_url": {
-                        "url": f"data:image/jpeg;base64,{screenshot_b64}"
-                    },
-                },
-            ],
-        }
-
-    return messages
-
-
-def generate_scraping_strategy(
-    page_summary: dict,
-    screenshot_b64: str | None,
-    ollama_url: str,
-    ollama_model: str
-) -> dict:
+def generate_scraping_strategy(page_summary: dict) -> dict:
     """
-    Ollama にページ構造を分析させ、スクレイピング戦略 JSON を返す。
-    画像付きで失敗した場合はテキストのみでフォールバックする。
+    Claude Code CLI にページ構造を分析させ、スクレイピング戦略 JSON を返す。
     """
-    if OpenAI is None:
-        raise ImportError("openai パッケージがインストールされていません")
-
-    client = OpenAI(
-        base_url=f"{ollama_url}/v1",
-        api_key="ollama",
-        timeout=300,        # CPU推論向けに十分な時間を確保
-        max_retries=0,      # 自動リトライは無効（手動フォールバックで制御）
-    )
-
     prompt = build_strategy_prompt(page_summary)
 
-    # 試行1: スクリーンショット付き（マルチモーダルモデルの場合）
-    if screenshot_b64 and _is_multimodal_model(ollama_model):
-        messages = _build_messages(prompt, screenshot_b64, ollama_model)
-        log("Ollama にスクレイピング戦略を問い合わせ中（スクリーンショット付き）...")
-        try:
-            result = _call_ollama(client, ollama_model, messages)
-            if result is not None:
-                return result
-        except Exception as e:
-            log(f"スクリーンショット付き問い合わせに失敗: {e}")
-
-        # 試行2: テキストのみでフォールバック
-        log("テキストのみで再問い合わせ中...")
-
-    messages = _build_messages(prompt, None, ollama_model)
-    if not (screenshot_b64 and _is_multimodal_model(ollama_model)):
-        log("Ollama にスクレイピング戦略を問い合わせ中...")
-
-    result = _call_ollama(client, ollama_model, messages)
-    if result is not None:
-        return result
-
-    raise ValueError("Ollama から有効なスクレイピング戦略を取得できませんでした")
-
-
-def _call_ollama(client, ollama_model: str, messages: list) -> dict | None:
-    """Ollama API を呼び出し、戦略 JSON を返す。失敗時は None を返す。"""
     # 推論中にハートビートを出力してC#側のアイドルタイムアウトを回避
     stop_heartbeat = threading.Event()
 
@@ -267,27 +181,27 @@ def _call_ollama(client, ollama_model: str, messages: list) -> dict | None:
         elapsed = 0
         while not stop_heartbeat.wait(30):
             elapsed += 30
-            log(f"Ollama 推論中... ({elapsed}秒経過)")
+            log(f"Claude 推論中... ({elapsed}秒経過)")
 
     hb_thread = threading.Thread(target=heartbeat, daemon=True)
     hb_thread.start()
+
     try:
-        response = client.chat.completions.create(
-            model=ollama_model,
-            messages=messages,
-            temperature=0.1,
-        )
+        log("Claude Code CLI にスクレイピング戦略を問い合わせ中...")
+        response_text = claude_call(prompt)
     finally:
         stop_heartbeat.set()
         hb_thread.join(timeout=1)
 
-    response_text = response.choices[0].message.content or ""
-    log(f"Ollama 応答長: {len(response_text)} 文字")
+    if not response_text:
+        raise ValueError("Claude Code CLI から応答を取得できませんでした")
+
+    log(f"Claude 応答長: {len(response_text)} 文字")
 
     strategy_json = extract_json_from_text(response_text)
     if not strategy_json:
-        log(f"Ollama の応答から有効な JSON を抽出できませんでした: {response_text[:200]}")
-        return None
+        log(f"Claude の応答から有効な JSON を抽出できませんでした: {response_text[:200]}")
+        raise ValueError("Claude Code CLI から有効なスクレイピング戦略を取得できませんでした")
 
     strategy = json.loads(strategy_json)
     log(f"戦略生成完了: page_type={strategy.get('page_type', 'unknown')}")
@@ -295,7 +209,7 @@ def _call_ollama(client, ollama_model: str, messages: list) -> dict | None:
 
 
 def build_strategy_prompt(page_summary: dict) -> str:
-    """Ollama に送るスクレイピング戦略生成プロンプトを構築する"""
+    """Claude Code CLI に送るスクレイピング戦略生成プロンプトを構築する"""
     dom_stats = json.dumps(page_summary.get("dom_stats", {}), ensure_ascii=False, indent=2)
 
     return f"""以下の Web ページの構造を分析し、最適なスクレイピング戦略を JSON で返してください。
@@ -428,7 +342,7 @@ def extract_json_from_text(text: str) -> str | None:
 
 def extract_with_strategy(page, url: str, strategy: dict) -> dict:
     """
-    Ollama が生成した戦略に基づいてページデータを抽出する。
+    Claude が生成した戦略に基づいてページデータを抽出する。
     """
     data = {
         "url": url,
@@ -947,15 +861,15 @@ def main():
     log(f"URL: {url}")
     log(f"出力先: {output_path}")
 
-    # Ollama 設定を環境変数から取得
-    ollama_url = os.environ.get("OLLAMA_URL", "")
-    ollama_model = os.environ.get("OLLAMA_MODEL", "")
+    # Claude Code CLI 設定を環境変数から取得
+    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
+    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
 
-    if not ollama_url or not ollama_model:
-        log("エラー: OLLAMA_URL / OLLAMA_MODEL 環境変数が設定されていません")
+    if not node_path or not cli_path:
+        log("エラー: CLAUDE_NODE_PATH / CLAUDE_CLI_PATH 環境変数が設定されていません")
         sys.exit(1)
 
-    log(f"Ollama: {ollama_url} / モデル: {ollama_model}")
+    log(f"Claude Code CLI: node={node_path} / cli={cli_path}")
 
     # Playwright の利用可能性チェック
     if sync_playwright is None:
@@ -1018,14 +932,11 @@ def main():
                     dismiss_cookie_banners(page)
                     _dismiss_overlays(page)
 
-                # Ollama に戦略を問い合わせ（初回）
+                # Claude Code CLI に戦略を問い合わせ（初回）
                 if strategy is None:
                     log("ページ構造を分析中...")
                     page_summary = get_page_summary(page, current_url)
-                    screenshot_b64 = capture_page_screenshot(page, ollama_model)
-                    strategy = generate_scraping_strategy(
-                        page_summary, screenshot_b64, ollama_url, ollama_model
-                    )
+                    strategy = generate_scraping_strategy(page_summary)
 
                 # 動的コンテンツの段階的読み込み + 抽出ループ
                 round_num = 0
@@ -1069,15 +980,12 @@ def main():
                         log("クリック可能な要素がないため、このページの読み込みを完了します")
                         break
 
-                    # 次のラウンド前に Ollama に戦略を再問い合わせ
+                    # 次のラウンド前に Claude Code CLI に戦略を再問い合わせ
                     if remaining_time() > 60:
                         log("ページ構造を再分析中...")
                         page_summary = get_page_summary(page, current_url)
-                        screenshot_b64 = capture_page_screenshot(page, ollama_model)
                         try:
-                            strategy = generate_scraping_strategy(
-                                page_summary, screenshot_b64, ollama_url, ollama_model
-                            )
+                            strategy = generate_scraping_strategy(page_summary)
                         except Exception as strat_err:
                             log(f"戦略再生成に失敗、前回の戦略を継続します: {strat_err}")
 

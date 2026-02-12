@@ -1,0 +1,43 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:actipro="http://schemas.actiprosoftware.com/avaloniaui"
+        x:Class="MarkItDown.GUI.Instagram2FADialog"
+        Title="Instagram 2段階認証"
+        Width="380"
+        Height="220"
+        WindowStartupLocation="CenterOwner"
+        CanResize="False">
+    <Border Padding="24">
+        <StackPanel Spacing="16">
+            <TextBlock x:Name="MessageText"
+                       Text="2段階認証コードを入力してください"
+                       TextWrapping="Wrap"
+                       FontSize="14"/>
+
+            <StackPanel Spacing="4">
+                <TextBlock Text="認証コード"
+                           FontSize="12"
+                           Foreground="#999999"/>
+                <TextBox x:Name="CodeInput"
+                         Watermark="6桁のコード"
+                         FontSize="16"
+                         MaxLength="8"/>
+            </StackPanel>
+
+            <StackPanel Orientation="Horizontal"
+                        HorizontalAlignment="Right"
+                        Spacing="8">
+                <Button x:Name="CancelButton"
+                        Content="キャンセル"
+                        Click="CancelButton_Click"
+                        Padding="16,6"
+                        FontSize="13"/>
+                <Button x:Name="SubmitButton"
+                        Content="送信"
+                        Click="SubmitButton_Click"
+                        Padding="16,6"
+                        FontSize="13"/>
+            </StackPanel>
+        </StackPanel>
+    </Border>
+</Window>

@@ -13,7 +13,6 @@ namespace MarkItDown.GUI.Models;
 [JsonSerializable(typeof(string[]))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(RedditThreadData))]
-[JsonSerializable(typeof(OllamaChatRequest))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 [JsonSerializable(typeof(Dictionary<string, JsonElement>))]
 [JsonSerializable(typeof(List<JsonElement>))]

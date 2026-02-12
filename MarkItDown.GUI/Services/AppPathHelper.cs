@@ -14,7 +14,7 @@ public static class AppPathHelper
     private static readonly Lazy<string> _settingsDirectory = new(ResolveSettingsDirectory);
 
     /// <summary>
-    /// ライブラリ保存用ディレクトリ（python, ffmpeg, ollama 等）。
+    /// ライブラリ保存用ディレクトリ（python, ffmpeg 等）。
     /// Velopack 環境: %LOCALAPPDATA%\MarkItDown.GUI\lib\
     /// デバッグ環境: {AppBaseDir}\lib\
     /// </summary>
@@ -31,6 +31,29 @@ public static class AppPathHelper
     /// アプリケーション実行ファイルのディレクトリ。
     /// </summary>
     public static string AppBaseDirectory => AppDomain.CurrentDomain.BaseDirectory;
+
+    /// <summary>Node.js インストールディレクトリ。</summary>
+    public static string NodeJsDir => Path.Combine(LibDirectory, "nodejs");
+
+    /// <summary>node.exe のパス。</summary>
+    public static string NodeExePath => Path.Combine(NodeJsDir, "node.exe");
+
+    /// <summary>npm グローバルインストール先ディレクトリ。</summary>
+    public static string NpmDir => Path.Combine(LibDirectory, "npm");
+
+    /// <summary>npm キャッシュディレクトリ。</summary>
+    public static string NpmCacheDir => Path.Combine(LibDirectory, "npm-cache");
+
+    /// <summary>Claude Code CLI (cli.js) のパス。</summary>
+    public static string CliJsPath => Path.Combine(NpmDir, "node_modules", "@anthropic-ai", "claude-code", "cli.js");
+
+    /// <summary>Claude Code CLI 用のディレクトリを作成する。</summary>
+    public static void EnsureClaudeCodeDirectories()
+    {
+        Directory.CreateDirectory(NodeJsDir);
+        Directory.CreateDirectory(NpmDir);
+        Directory.CreateDirectory(NpmCacheDir);
+    }
 
     /// <summary>
     /// Velopack の current フォルダ内で実行されているかどうかを判定する。

@@ -2,13 +2,9 @@ import os
 import sys
 import json
 import traceback
+import subprocess
 from datetime import datetime
 import asyncio
-
-try:
-    from openai import OpenAI
-except ImportError:
-    OpenAI = None
 
 # グローバル定数（毎回の再生成を回避）
 # .md / .json は出力形式と同一のため、フォルダスキャン時に自分の出力ファイルを再変換してしまうので除外
@@ -42,84 +38,69 @@ def _write_output_file(content, base_name, suffix, timestamp, directory):
     log_message(f'{suffix}出力完了: {output_path}')
     return filename
 
-def create_openai_client(ollama_url):
-    """OllamaのOpenAI互換クライアントを作成する。"""
-    if OpenAI is None:
-        log_message('openaiパッケージが利用できません。')
+def claude_call(prompt, stdin_text=""):
+    """Claude Code CLI を呼び出してレスポンスを取得する"""
+    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
+    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
+    if not node_path or not cli_path:
         return None
     try:
-        client = OpenAI(
-            base_url=f"{ollama_url}/v1",
-            api_key="ollama"
+        env = {**os.environ, "CI": "true"}
+        result = subprocess.run(
+            [node_path, cli_path, "-p", prompt],
+            input=stdin_text, capture_output=True, text=True,
+            timeout=300, env=env
         )
-        log_message(f'OpenAIクライアント作成: {ollama_url}/v1')
-        return client
+        if result.returncode == 0:
+            return result.stdout.strip()
+        log_message(f"Claude CLI returned non-zero exit code: {result.returncode}")
+        if result.stderr:
+            log_message(f"Claude CLI stderr: {result.stderr[:500]}")
+        return None
     except Exception as e:
-        log_message(f'OpenAIクライアント作成に失敗: {e}')
+        log_message(f"Claude CLI error: {e}")
         return None
 
 LLM_PROMPT = "この画像について詳しく説明してください。画像の内容、オブジェクト、色、雰囲気などを含めて説明してください。日本語で回答してください。"
 
-def create_markitdown_instance(ollama_client, ollama_model):
-    """MarkItDownインスタンスを作成する。Ollama設定があればネイティブLLM統合を使用する。"""
+def create_markitdown_instance():
+    """MarkItDownインスタンスを作成する。LLM統合はClaude CLIで別途行う。"""
     import markitdown
 
-    if ollama_client and ollama_model:
-        try:
-            md = markitdown.MarkItDown(
-                llm_client=ollama_client,
-                llm_model=ollama_model,
-                llm_prompt=LLM_PROMPT,
-            )
-            log_message(f'MarkItDownインスタンス作成（Ollama統合有効、モデル: {ollama_model}）')
-            return md
-        except Exception as e:
-            log_message(f'Ollama統合の初期化に失敗: {e}。LLM統合なしで続行します。')
-
     md = markitdown.MarkItDown()
-    log_message('MarkItDownインスタンス作成（LLM統合なし）')
+    log_message('MarkItDownインスタンス作成（LLM統合はClaude CLIで別途実行）')
     return md
 
-def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_name):
-    """Ollamaを使ってMarkdownテキストを分析・統計まとめする。"""
-    if not ollama_client or not ollama_model:
+def summarize_markdown_with_llm(raw_markdown, file_name):
+    """Claude CLIを使ってMarkdownテキストを分析・統計まとめする。"""
+    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
+    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
+    if not node_path or not cli_path:
         return None
 
     try:
         log_message(f'LLMでMarkdown分析開始: {file_name}')
 
-        response = ollama_client.chat.completions.create(
-            model=ollama_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "あなたは文書分析の専門家です。\n"
-                        "入力されたMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。\n\n"
-                        "【出力構成（この順序で出力すること）】\n"
-                        "1. 概要: 文書全体の目的・テーマを2〜3文で説明\n"
-                        "2. 統計情報: 文字数、段落数、見出し数、リンク数、画像数、表の数など該当するものを表形式で列挙\n"
-                        "3. 文書構造: 見出し階層をツリー形式で表示\n"
-                        "4. 主要トピック: 文書内の主要なトピックを箇条書きで列挙し、各トピックの要点を1〜2文で説明\n"
-                        "5. キーワード・固有名詞: 文書内で重要なキーワード、固有名詞、数値データを列挙\n"
-                        "6. 結論・要点: 文書の結論や最も重要なポイントをまとめる\n\n"
-                        "【ルール】\n"
-                        "- 必ず日本語で出力する（元のテキストが英語でも日本語に翻訳して出力する）\n"
-                        "- 出力はMarkdown形式で整形する\n"
-                        "- 情報を省略せず、網羅的かつ詳細に分析・説明する\n"
-                        "- 各セクションの内容を具体的に掘り下げ、要点だけでなく詳しい説明を含める\n"
-                        "- 分析結果のMarkdownだけを出力する（説明文や前置きは不要）"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": f"以下のMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。\n\n{raw_markdown}"
-                }
-            ],
-            timeout=300
+        prompt = (
+            "あなたは文書分析の専門家です。\n"
+            "入力されたMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。\n\n"
+            "【出力構成（この順序で出力すること）】\n"
+            "1. 概要: 文書全体の目的・テーマを2〜3文で説明\n"
+            "2. 統計情報: 文字数、段落数、見出し数、リンク数、画像数、表の数など該当するものを表形式で列挙\n"
+            "3. 文書構造: 見出し階層をツリー形式で表示\n"
+            "4. 主要トピック: 文書内の主要なトピックを箇条書きで列挙し、各トピックの要点を1〜2文で説明\n"
+            "5. キーワード・固有名詞: 文書内で重要なキーワード、固有名詞、数値データを列挙\n"
+            "6. 結論・要点: 文書の結論や最も重要なポイントをまとめる\n\n"
+            "【ルール】\n"
+            "- 必ず日本語で出力する（元のテキストが英語でも日本語に翻訳して出力する）\n"
+            "- 出力はMarkdown形式で整形する\n"
+            "- 情報を省略せず、網羅的かつ詳細に分析・説明する\n"
+            "- 各セクションの内容を具体的に掘り下げ、要点だけでなく詳しい説明を含める\n"
+            "- 分析結果のMarkdownだけを出力する（説明文や前置きは不要）\n\n"
+            "以下のMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。"
         )
 
-        summary = response.choices[0].message.content
+        summary = claude_call(prompt, stdin_text=raw_markdown)
         if summary and len(summary.strip()) > 0:
             log_message(f'LLM分析完了: {len(raw_markdown)}文字 → {len(summary)}文字')
             return summary
@@ -132,44 +113,34 @@ def summarize_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_
         return None
 
 
-def refine_markdown_with_llm(ollama_client, ollama_model, raw_markdown, file_name):
-    """Ollamaを使って崩れたMarkdownテキストを整形する。"""
-    if not ollama_client or not ollama_model:
+def refine_markdown_with_llm(raw_markdown, file_name):
+    """Claude CLIを使って崩れたMarkdownテキストを整形する。"""
+    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
+    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
+    if not node_path or not cli_path:
         return raw_markdown
 
     try:
         log_message(f'LLMでMarkdown整形開始: {file_name}')
 
-        response = ollama_client.chat.completions.create(
-            model=ollama_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "あなたはMarkdown整形アシスタントです。\n"
-                        "入力されたMarkdownテキストの書式だけを整えてください。\n\n"
-                        "【最重要ルール】\n"
-                        "- テキストの内容は一切省略しない。すべての文章・段落・項目をそのまま残すこと\n"
-                        "- 要約しない。短くまとめない。文を削除しない。言い換えない\n"
-                        "- 出力の文字数は入力とほぼ同じになるはず。大幅に短くなる場合は内容を省略している証拠なので、省略せず全文を出力すること\n"
-                        "- 必ず日本語で出力する（元のテキストが英語でも日本語に翻訳して出力する）\n"
-                        "- 表（テーブル）データはそのまま維持する\n\n"
-                        "【整形で行うこと】\n"
-                        "- 不要な連続空行を1行にまとめる\n"
-                        "- 壊れたMarkdown記法（閉じ忘れ、不正なリスト等）を修正する\n"
-                        "- 見出しレベル（#, ##, ###）の一貫性を保つ\n"
-                        "- 整形結果のMarkdownだけを出力する（説明文や前置きは不要）"
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": f"以下のMarkdownテキストの書式を整えてください。内容は変更せず、そのまま維持してください。\n\n{raw_markdown}"
-                }
-            ],
-            timeout=300
+        prompt = (
+            "あなたはMarkdown整形アシスタントです。\n"
+            "入力されたMarkdownテキストの書式だけを整えてください。\n\n"
+            "【最重要ルール】\n"
+            "- テキストの内容は一切省略しない。すべての文章・段落・項目をそのまま残すこと\n"
+            "- 要約しない。短くまとめない。文を削除しない。言い換えない\n"
+            "- 出力の文字数は入力とほぼ同じになるはず。大幅に短くなる場合は内容を省略している証拠なので、省略せず全文を出力すること\n"
+            "- 必ず日本語で出力する（元のテキストが英語でも日本語に翻訳して出力する）\n"
+            "- 表（テーブル）データはそのまま維持する\n\n"
+            "【整形で行うこと】\n"
+            "- 不要な連続空行を1行にまとめる\n"
+            "- 壊れたMarkdown記法（閉じ忘れ、不正なリスト等）を修正する\n"
+            "- 見出しレベル（#, ##, ###）の一貫性を保つ\n"
+            "- 整形結果のMarkdownだけを出力する（説明文や前置きは不要）\n\n"
+            "以下のMarkdownテキストの書式を整えてください。内容は変更せず、そのまま維持してください。"
         )
 
-        refined = response.choices[0].message.content
+        refined = claude_call(prompt, stdin_text=raw_markdown)
         if refined and len(refined.strip()) > 0:
             log_message(f'LLM整形完了: {len(raw_markdown)}文字 → {len(refined)}文字')
             return refined
@@ -188,17 +159,17 @@ try:
     app_dir = os.path.dirname(os.path.abspath(__file__))
     log_message('Application directory: ' + app_dir)
 
-    # Ollama設定を環境変数から取得
-    ollama_url = os.environ.get('OLLAMA_URL')
-    ollama_model = os.environ.get('OLLAMA_MODEL')
+    # Claude CLI設定を環境変数から取得
+    claude_node_path = os.environ.get('CLAUDE_NODE_PATH', '')
+    claude_cli_path = os.environ.get('CLAUDE_CLI_PATH', '')
 
-    if ollama_url and ollama_model:
-        log_message(f'Ollama設定が検出されました: {ollama_url}, モデル: {ollama_model}')
+    if claude_node_path and claude_cli_path:
+        log_message(f'Claude CLI設定が検出されました: node={claude_node_path}, cli={claude_cli_path}')
     else:
-        log_message('Ollama設定が見つかりません。画像説明機能は無効です。')
+        log_message('Claude CLI設定が見つかりません。LLM整形・分析機能は無効です。')
 
-    async def process_file_async(md, file_path, ollama_client=None, ollama_model=None):
-        """ファイルをMarkItDownで変換する。PDF等の構造化ドキュメントはOllamaで整形する。"""
+    async def process_file_async(md, file_path):
+        """ファイルをMarkItDownで変換する。PDF等の構造化ドキュメントはClaude CLIで整形する。"""
         try:
             file_name = os.path.basename(file_path)
             file_dir = os.path.dirname(file_path)
@@ -208,7 +179,7 @@ try:
             log_message(f'ファイル処理開始: {file_path}')
             log_message(f'ファイル名: {file_name}')
 
-            # Convert file using MarkItDown (LLM統合が有効ならば画像説明も自動生成)
+            # Convert file using MarkItDown
             try:
                 loop = asyncio.get_running_loop()
                 result = await loop.run_in_executor(None, md.convert, file_path)
@@ -232,7 +203,7 @@ try:
                     markdown_content += f"- 拡張子: {file_ext}\n\n"
                     markdown_content += f"![{file_name}]({file_path})\n\n"
                     markdown_content += "注: この画像にはテキスト情報が含まれていないか、OCR処理でテキストが検出されませんでした。\n"
-                    markdown_content += "画像の内容を説明するには、Ollama (gemma3 モデル推奨) を使用してください。\n"
+                    markdown_content += "画像の内容を説明するには、Claude CLI を使用してください。\n"
                     log_message(f'画像ファイル情報を追加しました')
                 else:
                     markdown_content = f"# {file_name}\n\n変換結果が空でした。\n"
@@ -247,12 +218,12 @@ try:
                 markdown_content, name_without_ext, '元データ', timestamp, file_dir
             )
 
-            # 2. 整形済・まとめ済（Ollama利用可能時のみ）
+            # 2. 整形済・まとめ済（Claude CLI利用可能時のみ）
             if (markdown_content and len(markdown_content.strip()) > 0
-                    and ollama_client and ollama_model):
+                    and claude_node_path and claude_cli_path):
                 formatted_content = await loop.run_in_executor(
                     None, refine_markdown_with_llm,
-                    ollama_client, ollama_model, markdown_content, file_name
+                    markdown_content, file_name
                 )
                 _write_output_file(
                     formatted_content, name_without_ext, '整形済', timestamp, file_dir
@@ -260,7 +231,7 @@ try:
 
                 summary_content = await loop.run_in_executor(
                     None, summarize_markdown_with_llm,
-                    ollama_client, ollama_model, markdown_content, file_name
+                    markdown_content, file_name
                 )
                 _write_output_file(
                     summary_content, name_without_ext, 'まとめ済', timestamp, file_dir
@@ -317,15 +288,10 @@ try:
             import markitdown
             log_message('MarkItDown library imported successfully')
 
-            # OpenAIクライアントを作成（MarkItDownとLLM整形の両方で再利用）
-            ollama_client = None
-            if ollama_url and ollama_model:
-                ollama_client = create_openai_client(ollama_url)
-
-            # Create a single MarkItDown instance to reuse (Ollama統合含む)
+            # Create a single MarkItDown instance to reuse (LLM統合はClaude CLIで別途実行)
             log_message('MarkItDownインスタンスを作成中...')
             try:
-                md = create_markitdown_instance(ollama_client, ollama_model)
+                md = create_markitdown_instance()
             except Exception as e:
                 log_message(f'MarkItDownインスタンス作成エラー: {e}')
                 raise
@@ -335,7 +301,7 @@ try:
                 log_message(f'ファイル処理開始（最大3並列処理）')
                 for i in range(0, len(file_paths), 3):
                     batch = file_paths[i:i+3]
-                    batch_tasks = [process_file_async(md, file_path, ollama_client, ollama_model) for file_path in batch]
+                    batch_tasks = [process_file_async(md, file_path) for file_path in batch]
                     batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
                     for result in batch_results:
                         if isinstance(result, Exception):
@@ -367,7 +333,7 @@ try:
                         converted_count = 0
                         for i in range(0, len(folder_file_paths), 3):
                             batch = folder_file_paths[i:i+3]
-                            batch_tasks = [process_file_async(md, fp, ollama_client, ollama_model) for fp in batch]
+                            batch_tasks = [process_file_async(md, fp) for fp in batch]
                             batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
                             for r in batch_results:
                                 if isinstance(r, Exception):

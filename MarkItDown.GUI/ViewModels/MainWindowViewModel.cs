@@ -15,8 +15,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private string _logText = "アプリケーションが起動したのだ...\n";
     private IBrush _dropZoneBackground;
     private FileProcessor? _fileProcessor;
-    private OllamaManager? _ollamaManager;
+    private ClaudeCodeSetupService? _claudeSetupService;
     private WebScraperService? _webScraperService;
+    private bool _isClaudeEnabled;
     private bool _isProcessing;
     private string _processingTitle = string.Empty;
     private string _processingStatus = string.Empty;
@@ -32,10 +33,10 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly object _progressLock = new();
     private double _pythonProgress;
     private double _ffmpegProgress;
-    private double _ollamaProgress;
+    private double _claudeProgress;
     private string _pythonStatus = string.Empty;
     private string _ffmpegStatus = string.Empty;
-    private string _ollamaStatus = string.Empty;
+    private string _claudeStatus = string.Empty;
     // 現在アクティブなダウンロードタスク数（0 なら IsDownloading=false）
     private int _activeDownloadCount;
 
@@ -116,6 +117,25 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Claude AI を使用するかどうか
+    /// </summary>
+    public bool IsClaudeEnabled
+    {
+        get => _isClaudeEnabled;
+        set
+        {
+            if (SetProperty(ref _isClaudeEnabled, value))
+            {
+                AppSettings.SetUseClaudeAI(value);
+                if (value)
+                {
+                    _ = SetupClaudeAsync();
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// コンストラクタ
     /// </summary>
     public MainWindowViewModel()
@@ -138,6 +158,11 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
+            // 設定ファイルを最初に読み込み
+            AppSettings.LoadSettings();
+            _isClaudeEnabled = AppSettings.GetUseClaudeAI();
+            OnPropertyChanged(nameof(IsClaudeEnabled));
+
             ShowProcessing("MarkItDown.GUI を初期化中...", "Python環境を初期化中...");
 
             var pythonEnvironmentManager = new PythonEnvironmentManager(LogMessage, UpdatePythonDownloadProgress, logError: LogError, logWarning: LogWarning);
@@ -149,27 +174,23 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            // ffmpeg, Ollama, パッケージインストールは互いに独立しているため並列実行
-            UpdateProcessingStatus("ffmpeg / Ollama / パッケージを並列で準備中...");
+            // ffmpeg とパッケージインストールは互いに独立しているため並列実行
+            UpdateProcessingStatus("ffmpeg / パッケージを並列で準備中...");
 
             var ffmpegManager = new FfmpegManager(LogMessage, UpdateFfmpegDownloadProgress, logError: LogError, logWarning: LogWarning);
-            _ollamaManager = new OllamaManager(LogMessage, UpdateOllamaDownloadProgress, UpdateOllamaStatus, logError: LogError, logWarning: LogWarning);
             var pythonExe = pythonEnvironmentManager.PythonExecutablePath;
             var pythonPackageManager = new PythonPackageManager(pythonExe, LogMessage, logError: LogError, logWarning: LogWarning);
 
-            // 並列ダウンロードフェーズ: ffmpeg と Ollama の進捗を集約表示する
-            // （PythonPackageManager は pip install のためプログレスコールバックを持たない）
+            // 並列ダウンロードフェーズ: ffmpeg の進捗を表示する
             lock (_progressLock)
             {
-                _activeDownloadCount = 2;
-                // Pythonフェーズの進捗をリセット（Python自体は既に完了済み）
+                _activeDownloadCount = 1;
                 _pythonProgress = 0;
                 _pythonStatus = string.Empty;
             }
 
             await Task.WhenAll(
                 ffmpegManager.InitializeAsync(),
-                _ollamaManager.InitializeAsync(),
                 pythonPackageManager.InstallMarkItDownPackageAsync());
 
             // 並列ダウンロード完了: 集約モードを解除
@@ -179,24 +200,25 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             var ffmpegBinPath = ffmpegManager.IsFfmpegAvailable ? ffmpegManager.FfmpegBinPath : null;
-            var ollamaUrl = _ollamaManager.IsOllamaAvailable ? _ollamaManager.OllamaUrl : null;
-            var ollamaModel = _ollamaManager.IsOllamaAvailable ? _ollamaManager.DefaultModel : null;
 
             UpdateProcessingStatus("MarkItDownライブラリを準備中...");
-            var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, ollamaUrl, ollamaModel, logError: LogError);
+            var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, logError: LogError);
             _fileProcessor = new FileProcessor(markItDownProcessor, LogMessage, logError: LogError);
 
             _webScraperService = new WebScraperService(LogMessage, UpdateProcessingStatus, logError: LogError);
             var playwrightScraper = new PlaywrightScraperService(pythonExe, LogMessage, UpdateProcessingStatus, logError: LogError);
 
-            // Ollama が利用可能な場合、Playwright/WebScraper に設定を渡す
-            if (_ollamaManager is { IsOllamaAvailable: true })
-            {
-                playwrightScraper.SetOllamaConfig(_ollamaManager.OllamaUrl, _ollamaManager.DefaultModel);
-                _webScraperService.SetOllamaConfig(_ollamaManager.OllamaUrl, _ollamaManager.DefaultModel);
-            }
+            // Instagram ログインコールバックを設定
+            playwrightScraper.InstagramLoginCallback = PromptInstagramLoginAsync;
+            playwrightScraper.Instagram2FACallback = PromptInstagram2FAAsync;
 
             _webScraperService.SetPlaywrightScraper(playwrightScraper);
+
+            // 保存された設定で Claude が有効な場合、セットアップを実行
+            if (_isClaudeEnabled)
+            {
+                await SetupClaudeAsync();
+            }
 
             UpdateProcessingStatus("初期化完了");
             LogMessage("すべての初期化が完了したのだ！");
@@ -210,6 +232,81 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             await Task.Delay(500);
             HideProcessing();
+        }
+    }
+
+    /// <summary>
+    /// Claude Code CLI のセットアップ・認証を実行する
+    /// </summary>
+    private async Task SetupClaudeAsync()
+    {
+        try
+        {
+            LogMessage("Claude AI セットアップを開始するのだ...");
+            _claudeSetupService = new ClaudeCodeSetupService(LogMessage, UpdateClaudeDownloadProgress, UpdateClaudeStatus);
+
+            // Node.js のインストール
+            UpdateClaudeStatus("Node.js を準備中...");
+            await _claudeSetupService.EnsureNodeJsAsync();
+
+            if (!_claudeSetupService.IsNodeJsInstalled)
+            {
+                LogMessage("Node.js のインストールに失敗したのだ。", LogLevel.Error);
+                return;
+            }
+
+            // Claude Code CLI のインストール
+            UpdateClaudeStatus("Claude Code CLI を準備中...");
+            await _claudeSetupService.EnsureCliAsync();
+
+            if (!_claudeSetupService.IsCliInstalled)
+            {
+                LogMessage("Claude Code CLI のインストールに失敗したのだ。", LogLevel.Error);
+                return;
+            }
+
+            // ログインチェック
+            UpdateClaudeStatus("Claude 認証を確認中...");
+            var isLoggedIn = await _claudeSetupService.IsLoggedInAsync();
+
+            if (!isLoggedIn)
+            {
+                LogMessage("Claude にログインしていないのだ。ログイン画面を起動するのだ...");
+                await _claudeSetupService.RunLoginAsync();
+                isLoggedIn = await _claudeSetupService.IsLoggedInAsync();
+            }
+
+            if (isLoggedIn)
+            {
+                // 接続検証
+                UpdateClaudeStatus("Claude 接続を検証中...");
+                var isConnected = await _claudeSetupService.VerifyConnectivityAsync();
+
+                if (isConnected)
+                {
+                    var nodePath = _claudeSetupService.GetNodePath();
+                    var cliJsPath = _claudeSetupService.GetCliJsPath();
+
+                    // WebScraperService と PlaywrightScraperService に Claude 設定を渡す
+                    _webScraperService?.SetClaudeConfig(nodePath, cliJsPath);
+                    _webScraperService?.GetPlaywrightScraper()?.SetClaudeConfig(nodePath, cliJsPath);
+
+                    LogMessage("Claude AI セットアップ完了なのだ！");
+                }
+                else
+                {
+                    LogMessage("Claude 接続検証に失敗したのだ。AI機能なしで動作するのだ。", LogLevel.Warning);
+                }
+            }
+            else
+            {
+                LogMessage("Claude ログインがキャンセルされたのだ。AI機能なしで動作するのだ。", LogLevel.Warning);
+            }
+        }
+        catch (Exception ex)
+        {
+            LogMessage($"Claude セットアップ中にエラーなのだ: {ex.Message}", LogLevel.Error);
+            Logger.LogException("Claude セットアップ中にエラーが発生しました", ex);
         }
     }
 
@@ -439,6 +536,36 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                     outputPath = System.IO.Path.Combine(userDir, $"{username}.json");
                     LogMessage($"X.com ユーザーフォルダを作成したのだ: {userDir}");
                 }
+                else if (host is "instagram.com" or "www.instagram.com" or "m.instagram.com"
+                          || host.EndsWith(".instagram.com", StringComparison.OrdinalIgnoreCase))
+                {
+                    // Instagram: ユーザーURLの場合はユーザーフォルダを作成
+                    // 投稿/リールURLの場合はinstagram_postフォルダを作成
+                    string folderName;
+                    if (WebScraperService.TryExtractInstagramUsername(normalizedUrl, out var igUsername))
+                    {
+                        folderName = igUsername;
+                    }
+                    else
+                    {
+                        // 投稿/リールURL: shortcodeからフォルダ名を生成
+                        var pathSegments = uri.AbsolutePath.Trim('/').Split('/');
+                        folderName = pathSegments.Length >= 2 ? $"instagram_{pathSegments[1]}" : "instagram_post";
+                    }
+
+                    var baseDirName = folderName;
+                    var userDir = System.IO.Path.Combine(outputDirectory, baseDirName);
+                    var suffix = 1;
+                    while (System.IO.Directory.Exists(userDir))
+                    {
+                        baseDirName = $"{folderName}_{suffix}";
+                        userDir = System.IO.Path.Combine(outputDirectory, baseDirName);
+                        suffix++;
+                    }
+                    System.IO.Directory.CreateDirectory(userDir);
+                    outputPath = System.IO.Path.Combine(userDir, $"{folderName}.json");
+                    LogMessage($"Instagram フォルダを作成したのだ: {userDir}");
+                }
                 else
                 {
                     var fileName = WebScraperService.GenerateSafeFileName(url);
@@ -543,27 +670,27 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Ollamaダウンロード進捗を更新する（プログレスバーのみ担当）
+    /// Claudeダウンロード進捗を更新する（プログレスバーのみ担当）
     /// </summary>
     /// <param name="progress">進捗率（0～100）</param>
-    private void UpdateOllamaDownloadProgress(double progress)
+    private void UpdateClaudeDownloadProgress(double progress)
     {
         lock (_progressLock)
         {
-            _ollamaProgress = progress;
+            _claudeProgress = progress;
         }
         UpdateAggregatedProgress();
     }
 
     /// <summary>
-    /// Ollamaステータスメッセージを更新する（オーバーレイのステータス文字列を担当）
+    /// Claudeステータスメッセージを更新する（オーバーレイのステータス文字列を担当）
     /// </summary>
     /// <param name="status">ステータスメッセージ</param>
-    private void UpdateOllamaStatus(string status)
+    private void UpdateClaudeStatus(string status)
     {
         lock (_progressLock)
         {
-            _ollamaStatus = status;
+            _claudeStatus = status;
         }
         UpdateAggregatedProgress();
     }
@@ -592,15 +719,15 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             }
             else
             {
-                // ffmpeg と Ollama の進捗を均等に加重平均（未開始=0, 完了=100 で計算）
-                aggregated = (_ffmpegProgress + _ollamaProgress) / count;
+                // ffmpeg と Claude の進捗を均等に加重平均（未開始=0, 完了=100 で計算）
+                aggregated = (_ffmpegProgress + _claudeProgress) / count;
                 anyDownloading = (_ffmpegProgress > 0 && _ffmpegProgress < 100)
-                              || (_ollamaProgress > 0 && _ollamaProgress < 100);
+                              || (_claudeProgress > 0 && _claudeProgress < 100);
 
                 // ステータスメッセージ: アクティブなダウンロードの状況を結合表示
                 var parts = new List<string>(2);
                 if (!string.IsNullOrEmpty(_ffmpegStatus)) parts.Add(_ffmpegStatus.TrimEnd('.'));
-                if (!string.IsNullOrEmpty(_ollamaStatus)) parts.Add(_ollamaStatus.TrimEnd('.'));
+                if (!string.IsNullOrEmpty(_claudeStatus)) parts.Add(_claudeStatus.TrimEnd('.'));
                 statusMessage = parts.Count > 0 ? string.Join(" / ", parts) : "準備中...";
             }
         }
@@ -625,6 +752,84 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             IsProcessing = false;
         });
+    }
+
+    // ────────────────────────────────────────────
+    //  Instagram ログインダイアログ
+    // ────────────────────────────────────────────
+
+    /// <summary>
+    /// Instagram のログイン情報をUIスレッドでユーザーに入力させる
+    /// </summary>
+    private async Task<(string Username, string Password)?> PromptInstagramLoginAsync(string message)
+    {
+        var tcs = new TaskCompletionSource<(string, string)?>();
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                var dialog = new InstagramLoginDialog();
+                dialog.SetMessage(message);
+                var mainWindow = Avalonia.Application.Current?.ApplicationLifetime is
+                    Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                    ? desktop.MainWindow : null;
+
+                if (mainWindow is not null)
+                {
+                    var result = await dialog.ShowDialog<(string, string)?>(mainWindow);
+                    tcs.TrySetResult(result);
+                }
+                else
+                {
+                    tcs.TrySetResult(null);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError($"ログインダイアログでエラー: {ex.Message}");
+                tcs.TrySetResult(null);
+            }
+        });
+
+        return await tcs.Task;
+    }
+
+    /// <summary>
+    /// Instagram の2FAコードをUIスレッドでユーザーに入力させる
+    /// </summary>
+    private async Task<string?> PromptInstagram2FAAsync(string message)
+    {
+        var tcs = new TaskCompletionSource<string?>();
+
+        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
+        {
+            try
+            {
+                var dialog = new Instagram2FADialog();
+                dialog.SetMessage(message);
+                var mainWindow = Avalonia.Application.Current?.ApplicationLifetime is
+                    Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
+                    ? desktop.MainWindow : null;
+
+                if (mainWindow is not null)
+                {
+                    var result = await dialog.ShowDialog<string?>(mainWindow);
+                    tcs.TrySetResult(result);
+                }
+                else
+                {
+                    tcs.TrySetResult(null);
+                }
+            }
+            catch (Exception ex)
+            {
+                LogError($"2FAダイアログでエラー: {ex.Message}");
+                tcs.TrySetResult(null);
+            }
+        });
+
+        return await tcs.Task;
     }
 
     /// <summary>
@@ -654,7 +859,6 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             try
             {
-                _ollamaManager?.Dispose();
                 _webScraperService?.Dispose();
             }
             catch (Exception ex)

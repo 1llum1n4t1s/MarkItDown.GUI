@@ -162,29 +162,29 @@ public class AppSettings
     }
 
     /// <summary>
-    /// OllamaのエンドポイントURLを取得する
+    /// Claude AI を使用するかどうかを取得する
     /// </summary>
-    public static string? GetOllamaUrl()
+    public static bool GetUseClaudeAI()
     {
         lock (_lock)
         {
             try
             {
-                var url = _settingsDocument?.Root?.Element("OllamaUrl")?.Value;
-                return string.IsNullOrWhiteSpace(url) ? null : url.Trim();
+                var value = _settingsDocument?.Root?.Element("UseClaudeAI")?.Value;
+                return bool.TryParse(value, out var result) && result;
             }
             catch
             {
-                return null;
+                return false;
             }
         }
     }
 
     /// <summary>
-    /// OllamaのエンドポイントURLを保存する
+    /// Claude AI を使用するかどうかを保存する
     /// </summary>
-    /// <param name="url">OllamaのURL（例: http://localhost:11434）</param>
-    public static void SetOllamaUrl(string? url)
+    /// <param name="useClaudeAI">Claude AI を使用するかどうか</param>
+    public static void SetUseClaudeAI(bool useClaudeAI)
     {
         lock (_lock)
         {
@@ -196,28 +196,21 @@ public class AppSettings
                     return;
                 }
 
-                var element = root.Element("OllamaUrl");
-                if (string.IsNullOrEmpty(url))
+                var element = root.Element("UseClaudeAI");
+                if (element is null)
                 {
-                    element?.Remove();
+                    root.Add(new XElement("UseClaudeAI", useClaudeAI.ToString().ToLowerInvariant()));
                 }
                 else
                 {
-                    if (element is null)
-                    {
-                        root.Add(new XElement("OllamaUrl", url));
-                    }
-                    else
-                    {
-                        element.Value = url;
-                    }
+                    element.Value = useClaudeAI.ToString().ToLowerInvariant();
                 }
 
                 _settingsDocument?.Save(SettingsPath);
             }
             catch (Exception ex)
             {
-                System.Diagnostics.Debug.WriteLine($"Failed to save OllamaUrl: {ex.Message}");
+                System.Diagnostics.Debug.WriteLine($"Failed to save UseClaudeAI: {ex.Message}");
             }
         }
     }
@@ -234,7 +227,7 @@ public class AppSettings
                 new XElement("UpdateRepoName", "MarkItDown.GUI"),
                 new XElement("UpdateChannel", "release"),
                 new XElement("PythonVersion", ""),
-                new XElement("OllamaUrl", "http://localhost:11434")
+                new XElement("UseClaudeAI", "false")
             );
 
             _settingsDocument = new XDocument(root);

@@ -14,18 +14,16 @@ namespace MarkItDown.GUI.Services;
 
 /// <summary>
 /// Webページをスクレイピングし、JSONで出力するサービス。
-/// Reddit は JSON API、その他は Playwright + Ollama ガイド型で抽出する。
+/// Reddit は JSON API、その他は Playwright + Claude ガイド型で抽出する。
 /// </summary>
 public sealed class WebScraperService : IDisposable
 {
     private readonly HttpClient _httpClient;
-    private readonly HttpClient _ollamaClient;
     private readonly Action<string> _logMessage;
     private readonly Action<string> _logError;
     private readonly Action<string>? _statusCallback;
     private PlaywrightScraperService? _playwrightScraper;
-    private string? _ollamaUrl;
-    private string? _ollamaModel;
+    private ClaudeCodeProcessHost? _claudeHost;
 
     public WebScraperService(Action<string> logMessage, Action<string>? statusCallback = null, Action<string>? logError = null)
     {
@@ -45,7 +43,6 @@ public sealed class WebScraperService : IDisposable
         };
         _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
-        _ollamaClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
     }
 
     /// <summary>
@@ -57,12 +54,16 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// Ollama接続情報を設定する（JSON整形に使用）
+    /// 設定済みの Playwright スクレイパーを取得する
     /// </summary>
-    public void SetOllamaConfig(string ollamaUrl, string ollamaModel)
+    public PlaywrightScraperService? GetPlaywrightScraper() => _playwrightScraper;
+
+    /// <summary>
+    /// Claude Code CLI 接続情報を設定する（JSON整形に使用）
+    /// </summary>
+    public void SetClaudeConfig(string nodePath, string cliJsPath)
     {
-        _ollamaUrl = ollamaUrl;
-        _ollamaModel = ollamaModel;
+        _claudeHost = new ClaudeCodeProcessHost();
     }
 
     // ────────────────────────────────────────────
@@ -71,7 +72,7 @@ public sealed class WebScraperService : IDisposable
 
     /// <summary>
     /// 任意のURLからページ情報を抽出し、JSONファイルとして保存する。
-    /// Reddit は JSON API で取得、その他は Playwright + Ollama ガイド型で
+    /// Reddit は JSON API で取得、その他は Playwright + Claude ガイド型で
     /// 動的コンテンツ（ページネーション・もっと見る等）を含めて取得する。
     /// </summary>
     public async Task ScrapeAsync(string url, string outputPath, CancellationToken ct = default)
@@ -108,7 +109,43 @@ public sealed class WebScraperService : IDisposable
             _logMessage($"X.com 専用スクレイピングを開始するのだ: @{username}");
             await _playwrightScraper.ScrapeXTwitterAsync(username, outputDir, ct);
 
-            // X.comはデータが膨大になるためOllama整形をスキップ
+            // X.comはデータが膨大になるためClaude整形をスキップ
+            _statusCallback?.Invoke("スクレイピング完了");
+            return;
+        }
+        else if (siteType == SiteType.Instagram)
+        {
+            // Instagram はInstaloader + Playwright認証で処理
+            if (_playwrightScraper is null)
+            {
+                throw new InvalidOperationException("Playwright スクレイパーが初期化されていません。");
+            }
+
+            var outputDir = Path.GetDirectoryName(outputPath);
+            if (outputDir is null)
+            {
+                _logError($"出力ディレクトリの取得に失敗したのだ: {outputPath}");
+                return;
+            }
+
+            // ユーザーURLか投稿/リールURLかを判定
+            string target;
+            if (TryExtractInstagramUsername(url, out var igUser))
+            {
+                target = igUser;
+                _statusCallback?.Invoke($"Instagram (@{target}) のスクレイピング中...");
+                _logMessage($"Instagram 専用スクレイピングを開始するのだ: @{target}");
+            }
+            else
+            {
+                // 投稿/リールURL: shortcodeまたはURL全体をPythonに渡す
+                target = url;
+                _statusCallback?.Invoke("Instagram 投稿のスクレイピング中...");
+                _logMessage($"Instagram 投稿/リールのスクレイピングを開始するのだ: {url}");
+            }
+            await _playwrightScraper.ScrapeInstagramAsync(target, outputDir, ct);
+
+            // Instagram はメディアファイルのみダウンロードのためClaude整形不要
             _statusCallback?.Invoke("スクレイピング完了");
             return;
         }
@@ -119,14 +156,14 @@ public sealed class WebScraperService : IDisposable
                 throw new InvalidOperationException("スクレイパーが初期化されていません。");
             }
 
-            // HTTP + Ollama ガイド型でスクレイピング（ブラウザ不要）
+            // HTTP + Claude ガイド型でスクレイピング（ブラウザ不要）
             _statusCallback?.Invoke("HTTP でスクレイピング中...");
-            _logMessage("HTTP + Ollama ガイド型でスクレイピングするのだ（ブラウザ不使用）...");
+            _logMessage("HTTP + Claude ガイド型でスクレイピングするのだ（ブラウザ不使用）...");
             await _playwrightScraper.ScrapeWithHttpAsync(url, outputPath, ct);
         }
 
-        // Ollama で JSON を整形・まとめし、3ファイル出力する
-        await ProcessJsonWithOllamaAsync(outputPath, ct);
+        // Claude で JSON を整形・まとめし、3ファイル出力する
+        await ProcessJsonWithClaudeAsync(outputPath, ct);
 
         _statusCallback?.Invoke("スクレイピング完了");
     }
@@ -157,6 +194,17 @@ public sealed class WebScraperService : IDisposable
                     ? $"reddit_{sub}_{id}"
                     : $"reddit_{sub}_{id}_{slug}";
                 return Sanitize(name) + ".json";
+            }
+
+            // Instagram — /username
+            if (IsInstagramHost(uri.Host.ToLowerInvariant()))
+            {
+                var igPath = uri.AbsolutePath.Trim('/');
+                if (!string.IsNullOrEmpty(igPath))
+                {
+                    var igUser = igPath.Split('/')[0];
+                    return Sanitize($"instagram_{igUser}") + ".json";
+                }
             }
 
             // Amazon — /dp/ASIN
@@ -192,15 +240,15 @@ public sealed class WebScraperService : IDisposable
     }
 
     // ────────────────────────────────────────────
-    //  Ollama JSON整形
+    //  Claude JSON整形
     // ────────────────────────────────────────────
 
     /// <summary>
     /// スクレイピング結果のJSONを3種類のファイルに分けて出力する。
-    /// 元データ（生JSON）、整形済（Ollama整形JSON）、まとめ済（OllamaによるMarkdownまとめ）。
-    /// Ollamaが利用できない場合は元データのリネームのみ行う。
+    /// 元データ（生JSON）、整形済（Claude整形JSON）、まとめ済（ClaudeによるMarkdownまとめ）。
+    /// Claudeが利用できない場合は元データのリネームのみ行う。
     /// </summary>
-    private async Task ProcessJsonWithOllamaAsync(string jsonFilePath, CancellationToken ct)
+    private async Task ProcessJsonWithClaudeAsync(string jsonFilePath, CancellationToken ct)
     {
         if (!File.Exists(jsonFilePath))
         {
@@ -221,9 +269,9 @@ public sealed class WebScraperService : IDisposable
         File.Move(jsonFilePath, originPath);
         _logMessage($"元データ出力完了なのだ: {originPath}");
 
-        if (string.IsNullOrEmpty(_ollamaUrl) || string.IsNullOrEmpty(_ollamaModel))
+        if (_claudeHost is null || !_claudeHost.IsAvailable())
         {
-            _logMessage("Ollama が設定されていないため、整形・まとめをスキップするのだ。");
+            _logMessage("Claude が設定されていないため、整形・まとめをスキップするのだ。");
             return;
         }
 
@@ -237,19 +285,19 @@ public sealed class WebScraperService : IDisposable
                 return;
             }
 
-            // 2. 整形済: Ollama でJSON整形
-            _statusCallback?.Invoke("Ollama でJSON整形中...");
-            _logMessage("Ollama でJSON整形を開始するのだ...");
+            // 2. 整形済: Claude でJSON整形
+            _statusCallback?.Invoke("Claude でJSON整形中...");
+            _logMessage("Claude でJSON整形を開始するのだ...");
 
             const int chunkThreshold = 30_000;
             string? formattedJson;
             if (rawJson.Length <= chunkThreshold)
             {
-                formattedJson = await FormatJsonChunkWithOllamaAsync(rawJson, ct);
+                formattedJson = await FormatJsonChunkWithClaudeAsync(rawJson, ct);
             }
             else
             {
-                formattedJson = await FormatLargeJsonWithOllamaAsync(rawJson, ct);
+                formattedJson = await FormatLargeJsonWithClaudeAsync(rawJson, ct);
             }
 
             if (!string.IsNullOrWhiteSpace(formattedJson))
@@ -257,33 +305,33 @@ public sealed class WebScraperService : IDisposable
                 try
                 {
                     JsonSerializer.Deserialize(formattedJson, AppJsonContext.Default.JsonElement);
-                    await WriteOllamaOutputAsync(formattedJson, dir, nameWithoutExt, timestamp, "整形済", "json", ct);
+                    await WriteClaudeOutputAsync(formattedJson, dir, nameWithoutExt, timestamp, "整形済", "json", ct);
                 }
                 catch (JsonException)
                 {
-                    _logMessage("Ollama の出力が有効なJSONではないため、整形済ファイルの出力をスキップするのだ。");
+                    _logMessage("Claude の出力が有効なJSONではないため、整形済ファイルの出力をスキップするのだ。");
                 }
             }
             else
             {
-                _logMessage("Ollama からの応答が空のため、整形済ファイルの出力をスキップするのだ。");
+                _logMessage("Claude からの応答が空のため、整形済ファイルの出力をスキップするのだ。");
             }
 
-            // 3. まとめ済: Ollama でMarkdownまとめ
-            _statusCallback?.Invoke("Ollama でJSONまとめ中...");
-            _logMessage("Ollama でJSONまとめを開始するのだ...");
+            // 3. まとめ済: Claude でMarkdownまとめ
+            _statusCallback?.Invoke("Claude でJSONまとめ中...");
+            _logMessage("Claude でJSONまとめを開始するのだ...");
 
-            var summaryMd = await SummarizeJsonWithOllamaAsync(rawJson, ct);
-            await WriteOllamaOutputAsync(summaryMd, dir, nameWithoutExt, timestamp, "まとめ済", "md", ct);
+            var summaryMd = await SummarizeJsonWithClaudeAsync(rawJson, ct);
+            await WriteClaudeOutputAsync(summaryMd, dir, nameWithoutExt, timestamp, "まとめ済", "md", ct);
         }
         catch (HttpRequestException ex)
         {
-            _logError($"Ollama への接続に失敗したのだ: {ex.Message}");
+            _logError($"Claude への接続に失敗したのだ: {ex.Message}");
             _logMessage("元データのみ保持するのだ。");
         }
         catch (TaskCanceledException)
         {
-            _logMessage("Ollama の処理がタイムアウトしたのだ。元データのみ保持するのだ。");
+            _logMessage("Claude の処理がタイムアウトしたのだ。元データのみ保持するのだ。");
         }
         catch (Exception ex)
         {
@@ -293,16 +341,16 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// Ollama の出力をファイルに書き込む共通ヘルパー。
+    /// Claude の出力をファイルに書き込む共通ヘルパー。
     /// content が空の場合はスキップし、書き込んだパスを返す（スキップ時は null）。
     /// </summary>
-    private async Task<string?> WriteOllamaOutputAsync(
+    private async Task<string?> WriteClaudeOutputAsync(
         string? content, string directory, string baseName, string timestamp,
         string suffix, string extension, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(content))
         {
-            _logMessage($"Ollama からの{suffix}応答が空のため、{suffix}ファイルの出力をスキップするのだ。");
+            _logMessage($"Claude からの{suffix}応答が空のため、{suffix}ファイルの出力をスキップするのだ。");
             return null;
         }
 
@@ -313,18 +361,18 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// 単一チャンクのJSONをOllamaで整形する
+    /// 単一チャンクのJSONをClaudeで整形する
     /// </summary>
-    private async Task<string?> FormatJsonChunkWithOllamaAsync(string rawJson, CancellationToken ct)
+    private async Task<string?> FormatJsonChunkWithClaudeAsync(string rawJson, CancellationToken ct)
     {
-        return await CallOllamaChatAsync(FormatSystemPrompt, BuildFormatUserPrompt(rawJson), ct);
+        return await CallClaudeAsync(FormatSystemPrompt, BuildFormatUserPrompt(rawJson), ct);
     }
 
     /// <summary>
-    /// 大きなJSONをチャンク分割してOllamaで整形する。
+    /// 大きなJSONをチャンク分割してClaudeで整形する。
     /// トップレベルの構造を維持しつつ、ページ単位で分割処理する。
     /// </summary>
-    private async Task<string?> FormatLargeJsonWithOllamaAsync(string rawJson, CancellationToken ct)
+    private async Task<string?> FormatLargeJsonWithClaudeAsync(string rawJson, CancellationToken ct)
     {
         _statusCallback?.Invoke("JSONをチャンク分割で整形中...");
         _logMessage("JSONが大きいため、チャンク分割で整形するのだ...");
@@ -351,12 +399,12 @@ public sealed class WebScraperService : IDisposable
 
             // その他の場合は分割せずにそのまま送信（サイズ制限超えでも試行）
             _logMessage("JSONの構造が分割に適していないため、一括で整形を試みるのだ...");
-            return await FormatJsonChunkWithOllamaAsync(rawJson, ct);
+            return await FormatJsonChunkWithClaudeAsync(rawJson, ct);
         }
         catch (JsonException)
         {
             _logError("JSON解析エラーのため、一括で整形を試みるのだ...");
-            return await FormatJsonChunkWithOllamaAsync(rawJson, ct);
+            return await FormatJsonChunkWithClaudeAsync(rawJson, ct);
         }
     }
 
@@ -376,7 +424,7 @@ public sealed class WebScraperService : IDisposable
             _logMessage($"ページ {i + 1}/{pageCount} を整形中なのだ...");
 
             var pageJson = JsonSerializer.Serialize(pages[i], AppJsonIndentedContext.Default.JsonElement);
-            var formatted = await FormatJsonChunkWithOllamaAsync(pageJson, ct);
+            var formatted = await FormatJsonChunkWithClaudeAsync(pageJson, ct);
 
             if (!string.IsNullOrWhiteSpace(formatted))
             {
@@ -427,7 +475,7 @@ public sealed class WebScraperService : IDisposable
             _logMessage($"content要素 {i + 1}/{itemCount} を整形中なのだ...");
 
             var itemJson = JsonSerializer.Serialize(contentArray[i], AppJsonIndentedContext.Default.JsonElement);
-            var formatted = await FormatJsonChunkWithOllamaAsync(itemJson, ct);
+            var formatted = await FormatJsonChunkWithClaudeAsync(itemJson, ct);
 
             if (!string.IsNullOrWhiteSpace(formatted))
             {
@@ -463,107 +511,80 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// Ollama の OpenAI互換チャットエンドポイント (/v1/chat/completions) を呼び出す
+    /// Claude Code CLI を呼び出す
     /// </summary>
-    private async Task<string?> CallOllamaChatAsync(string systemPrompt, string userMessage, CancellationToken ct)
+    private async Task<string?> CallClaudeAsync(string systemPrompt, string userMessage, CancellationToken ct)
     {
-        var requestBody = new OllamaChatRequest
+        if (_claudeHost is null)
+            return null;
+
+        var prompt = $"{systemPrompt}\n\n{userMessage}";
+        var text = await _claudeHost.ExecuteAsync(prompt, "", ct);
+
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+
+        // Claude の応答から JSON 部分だけを抽出する
+        // ```json ... ``` で囲まれている場合
+        var codeBlockMatch = Regex.Match(text, @"```(?:json)?\s*\n?(.*?)\n?```",
+            RegexOptions.Singleline);
+        if (codeBlockMatch.Success)
         {
-            Model = _ollamaModel ?? "",
-            Messages =
-            [
-                new OllamaChatMessage { Role = "system", Content = systemPrompt },
-                new OllamaChatMessage { Role = "user", Content = userMessage }
-            ],
-            Stream = false,
-            Temperature = 0.1,
-            MaxTokens = 16384
-        };
+            return codeBlockMatch.Groups[1].Value.Trim();
+        }
 
-        var requestJson = JsonSerializer.Serialize(requestBody, AppJsonContext.Default.OllamaChatRequest);
-        using var content = new StringContent(requestJson, System.Text.Encoding.UTF8, "application/json");
+        // JSON オブジェクトまたは配列をスタックベースで抽出
+        var objStart = text.IndexOf('{');
+        var arrStart = text.IndexOf('[');
 
-        using var response = await _ollamaClient.PostAsync($"{_ollamaUrl}/v1/chat/completions", content, ct);
-        response.EnsureSuccessStatusCode();
-
-        var responseJson = await response.Content.ReadAsStringAsync(ct);
-        var responseDoc = JsonSerializer.Deserialize(responseJson, AppJsonContext.Default.JsonElement);
-
-        // OpenAI互換レスポンス: choices[0].message.content
-        if (responseDoc.TryGetProperty("choices", out var choices) &&
-            choices.ValueKind == JsonValueKind.Array &&
-            choices.GetArrayLength() > 0 &&
-            choices[0].TryGetProperty("message", out var message) &&
-            message.TryGetProperty("content", out var responseText))
+        if (objStart == -1 && arrStart == -1)
         {
-            var text = responseText.GetString() ?? "";
-
-            // Ollama の応答から JSON 部分だけを抽出する
-            // ```json ... ``` で囲まれている場合
-            var codeBlockMatch = Regex.Match(text, @"```(?:json)?\s*\n?(.*?)\n?```",
-                RegexOptions.Singleline);
-            if (codeBlockMatch.Success)
-            {
-                return codeBlockMatch.Groups[1].Value.Trim();
-            }
-
-            // JSON オブジェクトまたは配列をスタックベースで抽出
-            var objStart = text.IndexOf('{');
-            var arrStart = text.IndexOf('[');
-
-            if (objStart == -1 && arrStart == -1)
-            {
-                return text.Trim();
-            }
-
-            int start;
-            char openChar;
-            char closeChar;
-
-            // 先に出現する開始文字を特定し、対応する終了文字を決定
-            if (objStart != -1 && (arrStart == -1 || objStart < arrStart))
-            {
-                start = objStart;
-                openChar = '{';
-                closeChar = '}';
-            }
-            else
-            {
-                start = arrStart;
-                openChar = '[';
-                closeChar = ']';
-            }
-
-            // スタックで対応する閉じ文字を探す（文字列リテラル内を考慮）
-            var depth = 0;
-            var inString = false;
-            var escapeNext = false;
-            var end = -1;
-
-            for (var i = start; i < text.Length; i++)
-            {
-                var c = text[i];
-                if (escapeNext) { escapeNext = false; continue; }
-                if (c == '\\' && inString) { escapeNext = true; continue; }
-                if (c == '"') { inString = !inString; continue; }
-                if (inString) continue;
-                if (c == openChar) depth++;
-                else if (c == closeChar)
-                {
-                    depth--;
-                    if (depth == 0) { end = i; break; }
-                }
-            }
-
-            if (end > start)
-            {
-                return text[start..(end + 1)];
-            }
-
             return text.Trim();
         }
 
-        return null;
+        int start;
+        char openChar;
+        char closeChar;
+
+        if (objStart != -1 && (arrStart == -1 || objStart < arrStart))
+        {
+            start = objStart;
+            openChar = '{';
+            closeChar = '}';
+        }
+        else
+        {
+            start = arrStart;
+            openChar = '[';
+            closeChar = ']';
+        }
+
+        var depth = 0;
+        var inString = false;
+        var escapeNext = false;
+        var end = -1;
+
+        for (var i = start; i < text.Length; i++)
+        {
+            var c = text[i];
+            if (escapeNext) { escapeNext = false; continue; }
+            if (c == '\\' && inString) { escapeNext = true; continue; }
+            if (c == '"') { inString = !inString; continue; }
+            if (inString) continue;
+            if (c == openChar) depth++;
+            else if (c == closeChar)
+            {
+                depth--;
+                if (depth == 0) { end = i; break; }
+            }
+        }
+
+        if (end > start)
+        {
+            return text[start..(end + 1)];
+        }
+
+        return text.Trim();
     }
 
     /// <summary>
@@ -617,19 +638,19 @@ public sealed class WebScraperService : IDisposable
         """;
 
     /// <summary>
-    /// Ollama を使用してJSONデータを分析・統計まとめする
+    /// Claude を使用してJSONデータを分析・統計まとめする
     /// </summary>
-    private async Task<string?> SummarizeJsonWithOllamaAsync(string rawJson, CancellationToken ct)
+    private async Task<string?> SummarizeJsonWithClaudeAsync(string rawJson, CancellationToken ct)
     {
         var userMessage = $"以下のJSONデータを分析し、統計情報と構造化されたまとめをMarkdown形式で作成してください:\n\n{rawJson}";
-        return await CallOllamaChatAsync(SummarySystemPrompt, userMessage, ct);
+        return await CallClaudeAsync(SummarySystemPrompt, userMessage, ct);
     }
 
     // ────────────────────────────────────────────
     //  サイト種別判定
     // ────────────────────────────────────────────
 
-    private enum SiteType { Reddit, XTwitter, Generic }
+    private enum SiteType { Reddit, XTwitter, Instagram, Generic }
 
     private static SiteType DetectSiteType(string url)
     {
@@ -640,6 +661,8 @@ public sealed class WebScraperService : IDisposable
                 return SiteType.Reddit;
             if (IsXTwitterHost(host) && IsXTwitterUserUrl(uri))
                 return SiteType.XTwitter;
+            if (IsInstagramHost(host) && IsInstagramUrl(uri))
+                return SiteType.Instagram;
         }
         return SiteType.Generic;
     }
@@ -657,6 +680,83 @@ public sealed class WebScraperService : IDisposable
         return host is "x.com" or "www.x.com"
             or "twitter.com" or "www.twitter.com"
             or "mobile.twitter.com" or "mobile.x.com";
+    }
+
+    private static bool IsInstagramHost(string host)
+    {
+        return host is "instagram.com" or "www.instagram.com"
+            or "m.instagram.com"
+            || host.EndsWith(".instagram.com", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// InstagramのURL（ユーザーページ、投稿、リール等）かどうかを判定する。
+    /// Instagramホストの有効なページURLであれば true を返す。
+    /// </summary>
+    private static bool IsInstagramUrl(Uri uri)
+    {
+        var path = uri.AbsolutePath.Trim('/');
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        var firstSegment = path.Split('/')[0].ToLowerInvariant();
+
+        // Instagram の投稿やリール等もサポート
+        var instagramContentPaths = new[] { "p", "reel", "reels", "stories" };
+        foreach (var contentPath in instagramContentPaths)
+        {
+            if (firstSegment == contentPath)
+                return true;
+        }
+
+        // システムパスを除外
+        var excludedPaths = new[]
+        {
+            "explore", "accounts",
+            "direct", "directory", "about", "legal", "privacy",
+            "terms", "developer", "api", "static", "challenge",
+            "emails", "press", "blog"
+        };
+
+        foreach (var excluded in excludedPaths)
+        {
+            if (firstSegment == excluded)
+                return false;
+        }
+
+        // ユーザー名はアルファベット、数字、ピリオド、アンダースコア（1〜30文字）
+        return Regex.IsMatch(firstSegment, @"^[A-Za-z0-9._]{1,30}$");
+    }
+
+    /// <summary>
+    /// InstagramのユーザーページURLかどうかを判定する。
+    /// /username 形式であり、/p/, /reel/ 等のコンテンツパスやシステムパスではないことを確認する。
+    /// </summary>
+    private static bool IsInstagramUserUrl(Uri uri)
+    {
+        var path = uri.AbsolutePath.Trim('/');
+        if (string.IsNullOrEmpty(path))
+            return false;
+
+        // システムパスおよびコンテンツパスを除外
+        var excludedPaths = new[]
+        {
+            "explore", "accounts", "p", "reel", "reels", "stories",
+            "direct", "directory", "about", "legal", "privacy",
+            "terms", "developer", "api", "static", "challenge",
+            "emails", "press", "blog"
+        };
+
+        var firstSegment = path.Split('/')[0].ToLowerInvariant();
+
+        foreach (var excluded in excludedPaths)
+        {
+            if (firstSegment == excluded)
+                return false;
+        }
+
+        // ユーザー名はアルファベット、数字、ピリオド、アンダースコア（1〜30文字）
+        return Regex.IsMatch(firstSegment, @"^[A-Za-z0-9._]{1,30}$");
     }
 
     /// <summary>
@@ -722,6 +822,55 @@ public sealed class WebScraperService : IDisposable
         }
 
         if (!IsXTwitterUserUrl(uri))
+        {
+            return false;
+        }
+
+        var path = uri.AbsolutePath.Trim('/');
+        if (string.IsNullOrWhiteSpace(path))
+        {
+            return false;
+        }
+
+        username = path.Split('/')[0];
+        if (username.Contains('?'))
+        {
+            username = username.Split('?')[0];
+        }
+
+        return !string.IsNullOrWhiteSpace(username);
+    }
+
+    /// <summary>
+    /// InstagramのURLからユーザー名を抽出する
+    /// </summary>
+    public static string ExtractInstagramUsername(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            throw new ArgumentException($"無効なURL: {url}");
+
+        var path = uri.AbsolutePath.Trim('/');
+        var username = path.Split('/')[0];
+
+        if (username.Contains('?'))
+            username = username.Split('?')[0];
+
+        return username;
+    }
+
+    /// <summary>
+    /// InstagramのユーザーページURLであればユーザー名を取得する
+    /// </summary>
+    public static bool TryExtractInstagramUsername(string url, out string username)
+    {
+        username = string.Empty;
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        if (!IsInstagramUserUrl(uri))
         {
             return false;
         }
@@ -928,6 +1077,5 @@ public sealed class WebScraperService : IDisposable
     public void Dispose()
     {
         _httpClient.Dispose();
-        _ollamaClient.Dispose();
     }
 }

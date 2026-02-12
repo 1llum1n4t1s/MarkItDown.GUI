@@ -14,8 +14,8 @@ public class MarkItDownProcessor
     private readonly Action<string> _logMessage;
     private readonly Action<string> _logError;
     private readonly string? _ffmpegBinPath;
-    private readonly string? _ollamaUrl;
-    private readonly string? _ollamaModel;
+    private readonly string? _claudeNodePath;
+    private readonly string? _claudeCliPath;
 
     /// <summary>
     /// Constructor
@@ -23,17 +23,17 @@ public class MarkItDownProcessor
     /// <param name="pythonExecutablePath">Path to Python executable</param>
     /// <param name="logMessage">Log output function</param>
     /// <param name="ffmpegBinPath">Path to ffmpeg bin directory (optional)</param>
-    /// <param name="ollamaUrl">Ollama endpoint URL (optional)</param>
-    /// <param name="ollamaModel">Ollama model name (optional)</param>
+    /// <param name="claudeNodePath">Claude Code Node.js path (optional)</param>
+    /// <param name="claudeCliPath">Claude Code CLI js path (optional)</param>
     /// <param name="logError">Error log delegate (optional, defaults to logMessage)</param>
-    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null, string? ollamaUrl = null, string? ollamaModel = null, Action<string>? logError = null)
+    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null, string? claudeNodePath = null, string? claudeCliPath = null, Action<string>? logError = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
         _logError = logError ?? logMessage;
         _ffmpegBinPath = ffmpegBinPath;
-        _ollamaUrl = ollamaUrl;
-        _ollamaModel = ollamaModel;
+        _claudeNodePath = claudeNodePath;
+        _claudeCliPath = claudeCliPath;
     }
 
     /// <summary>
@@ -157,16 +157,16 @@ public class MarkItDownProcessor
                 startInfo.Environment["PATH"] = $"{_ffmpegBinPath};{currentPath}";
             }
 
-            if (!string.IsNullOrEmpty(_ollamaUrl))
+            if (!string.IsNullOrEmpty(_claudeNodePath))
             {
-                startInfo.Environment["OLLAMA_URL"] = _ollamaUrl;
-                _logMessage($"Ollama URL設定: {_ollamaUrl}");
+                startInfo.Environment["CLAUDE_NODE_PATH"] = _claudeNodePath;
+                _logMessage($"Claude Node.js設定: {_claudeNodePath}");
             }
 
-            if (!string.IsNullOrEmpty(_ollamaModel))
+            if (!string.IsNullOrEmpty(_claudeCliPath))
             {
-                startInfo.Environment["OLLAMA_MODEL"] = _ollamaModel;
-                _logMessage($"Ollama Model設定: {_ollamaModel}");
+                startInfo.Environment["CLAUDE_CLI_PATH"] = _claudeCliPath;
+                _logMessage($"Claude CLI設定: {_claudeCliPath}");
             }
 
             using var process = Process.Start(startInfo);

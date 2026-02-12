@@ -42,7 +42,7 @@ public static class TimeoutSettings
 
     /// <summary>
     /// Timeout for MarkItDown file conversion (10 minutes)
-    /// Ollamaでの画像説明生成を含む場合、処理に時間がかかるため長めに設定
+    /// Claudeでの画像説明生成を含む場合、処理に時間がかかるため長めに設定
     /// </summary>
     public const int FileConversionTimeoutMs = 600000;
 
@@ -63,4 +63,10 @@ public static class TimeoutSettings
     /// 全ツイート取得＋画像ダウンロードで長時間かかるため、汎用より長めに設定
     /// </summary>
     public const int XTwitterIdleTimeoutMs = 600000;
+
+    /// <summary>
+    /// Idle timeout for Instagram scraping (10 minutes)
+    /// 全投稿メディアダウンロードで長時間かかるため、汎用より長めに設定
+    /// </summary>
+    public const int InstagramIdleTimeoutMs = 600000;
 }

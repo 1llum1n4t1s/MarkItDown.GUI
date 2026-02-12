@@ -19,8 +19,20 @@ public sealed class PlaywrightScraperService
     private readonly Action<string> _logError;
     private readonly Action<string>? _statusCallback;
     private bool _dependenciesInstalled;
-    private string? _ollamaUrl;
-    private string? _ollamaModel;
+    private string? _claudeNodePath;
+    private string? _claudeCliPath;
+
+    /// <summary>
+    /// Instagram ログイン情報を要求するコールバック。
+    /// 引数はプロンプトメッセージ、戻り値は (username, password)。null ならキャンセル。
+    /// </summary>
+    public Func<string, Task<(string Username, string Password)?>>? InstagramLoginCallback { get; set; }
+
+    /// <summary>
+    /// Instagram 2FAコードを要求するコールバック。
+    /// 引数はプロンプトメッセージ、戻り値はコード文字列。null ならキャンセル。
+    /// </summary>
+    public Func<string, Task<string?>>? Instagram2FACallback { get; set; }
 
     public PlaywrightScraperService(string pythonExecutablePath, Action<string> logMessage, Action<string>? statusCallback = null, Action<string>? logError = null)
     {
@@ -31,12 +43,12 @@ public sealed class PlaywrightScraperService
     }
 
     /// <summary>
-    /// Ollama接続情報を設定する（Pythonスクリプトに環境変数で渡す）
+    /// Claude Code CLI接続情報を設定する（Pythonスクリプトに環境変数で渡す）
     /// </summary>
-    public void SetOllamaConfig(string ollamaUrl, string ollamaModel)
+    public void SetClaudeConfig(string nodePath, string cliJsPath)
     {
-        _ollamaUrl = ollamaUrl;
-        _ollamaModel = ollamaModel;
+        _claudeNodePath = nodePath;
+        _claudeCliPath = cliJsPath;
     }
 
     /// <summary>
@@ -107,11 +119,11 @@ public sealed class PlaywrightScraperService
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        // Ollama 設定を環境変数で渡す
-        if (!string.IsNullOrEmpty(_ollamaUrl))
-            startInfo.Environment["OLLAMA_URL"] = _ollamaUrl;
-        if (!string.IsNullOrEmpty(_ollamaModel))
-            startInfo.Environment["OLLAMA_MODEL"] = _ollamaModel;
+        // Claude Code CLI 設定を環境変数で渡す
+        if (!string.IsNullOrEmpty(_claudeNodePath))
+            startInfo.Environment["CLAUDE_NODE_PATH"] = _claudeNodePath;
+        if (!string.IsNullOrEmpty(_claudeCliPath))
+            startInfo.Environment["CLAUDE_CLI_PATH"] = _claudeCliPath;
 
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(url);
@@ -201,7 +213,7 @@ public sealed class PlaywrightScraperService
 
     /// <summary>
     /// ブラウザを使わない HTTP ベースのスクレイピング。
-    /// requests + BeautifulSoup + Ollama ガイド型で処理する。
+    /// requests + BeautifulSoup + Claude ガイド型で処理する。
     /// </summary>
     public async Task ScrapeWithHttpAsync(string url, string outputPath, CancellationToken ct = default)
     {
@@ -228,11 +240,11 @@ public sealed class PlaywrightScraperService
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        // Ollama 設定を環境変数で渡す
-        if (!string.IsNullOrEmpty(_ollamaUrl))
-            startInfo.Environment["OLLAMA_URL"] = _ollamaUrl;
-        if (!string.IsNullOrEmpty(_ollamaModel))
-            startInfo.Environment["OLLAMA_MODEL"] = _ollamaModel;
+        // Claude Code CLI 設定を環境変数で渡す
+        if (!string.IsNullOrEmpty(_claudeNodePath))
+            startInfo.Environment["CLAUDE_NODE_PATH"] = _claudeNodePath;
+        if (!string.IsNullOrEmpty(_claudeCliPath))
+            startInfo.Environment["CLAUDE_CLI_PATH"] = _claudeCliPath;
 
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(url);
@@ -452,6 +464,240 @@ public sealed class PlaywrightScraperService
     }
 
     /// <summary>
+    /// Instagram 専用スクレイピング。Pythonスクリプト scrape_instagram.py を起動して
+    /// 全投稿のメディア（画像・動画）をダウンロードする。
+    /// </summary>
+    /// <param name="username">Instagramのユーザー名（@なし）</param>
+    /// <param name="outputDir">出力先ディレクトリ</param>
+    /// <param name="ct">キャンセルトークン</param>
+    public async Task ScrapeInstagramAsync(string username, string outputDir, CancellationToken ct = default)
+    {
+        await EnsureDependenciesInstalledAsync(ct);
+
+        // instaloader パッケージの追加インストール
+        if (!await CheckPackageInstalledAsync("instaloader", ct))
+        {
+            _logMessage("instaloader パッケージをインストール中なのだ...");
+        }
+        else
+        {
+            _logMessage("instaloader パッケージの最新バージョンを確認中なのだ...");
+        }
+        await InstallPackageAsync("instaloader", ct);
+
+        // pycryptodomex パッケージの追加インストール（ブラウザCookie復号用）
+        if (!await CheckPackageInstalledAsync("Cryptodome", ct))
+        {
+            _logMessage("pycryptodomex パッケージをインストール中なのだ...");
+            await InstallPackageAsync("pycryptodomex", ct);
+        }
+
+        var appDir = Directory.GetCurrentDirectory();
+        var scriptPath = Path.Combine(appDir, "Scripts", "scrape_instagram.py");
+
+        if (!File.Exists(scriptPath))
+        {
+            throw new FileNotFoundException($"Instagramスクレイピングスクリプトが見つかりません: {scriptPath}");
+        }
+
+        _statusCallback?.Invoke($"Instagram (@{username}) のスクレイピング準備中...");
+        _logMessage($"Instagram 専用スクレイピング開始なのだ: @{username}");
+
+        var startInfo = new ProcessStartInfo
+        {
+            FileName = _pythonExecutablePath,
+            WorkingDirectory = appDir,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            RedirectStandardInput = true, // stdin でログイン情報を送信
+            CreateNoWindow = true,
+            StandardOutputEncoding = Encoding.UTF8,
+            StandardErrorEncoding = Encoding.UTF8
+        };
+
+        // セッションディレクトリを環境変数で渡す
+        var sessionDir = Path.Combine(appDir, "lib", "playwright", "instagram_session");
+        startInfo.Environment["IG_SESSION_DIR"] = sessionDir;
+
+        startInfo.ArgumentList.Add(scriptPath);
+        startInfo.ArgumentList.Add(username);
+        startInfo.ArgumentList.Add(outputDir);
+
+        using var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            throw new InvalidOperationException("Python プロセスの起動に失敗しました");
+        }
+
+        // アイドルタイムアウト: Instagram用は長めに設定（10分）
+        using var idleCts = new CancellationTokenSource();
+
+        void ResetIdleTimer()
+        {
+            try
+            {
+                idleCts.CancelAfter(TimeoutSettings.InstagramIdleTimeoutMs);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+        }
+
+        ResetIdleTimer();
+
+        // [INPUT_REQUIRED] 検知用のイベントベースハンドラ
+        process.OutputDataReceived += async (_, e) =>
+        {
+            if (string.IsNullOrEmpty(e.Data)) return;
+
+            _logMessage(e.Data);
+            ResetIdleTimer();
+            UpdateInstagramStatus(e.Data, username);
+
+            // ログイン情報の入力要求を検知
+            if (e.Data.Contains("[INPUT_REQUIRED] LOGIN"))
+            {
+                await HandleInstagramLoginInputAsync(process);
+            }
+            else if (e.Data.Contains("[INPUT_REQUIRED] 2FA"))
+            {
+                await HandleInstagram2FAInputAsync(process);
+            }
+        };
+        process.ErrorDataReceived += (_, e) =>
+        {
+            if (!string.IsNullOrEmpty(e.Data))
+            {
+                _logMessage($"[stderr] {e.Data}");
+                ResetIdleTimer();
+            }
+        };
+        process.BeginOutputReadLine();
+        process.BeginErrorReadLine();
+
+        try
+        {
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, idleCts.Token);
+            await process.WaitForExitAsync(linkedCts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+            {
+                _logMessage("Instagramスクレイピングがタイムアウトまたはキャンセルされたのだ。プロセスを強制終了するのだ。");
+                try { process.Kill(true); } catch (InvalidOperationException) { /* プロセスは既に終了しています */ }
+            }
+            if (ct.IsCancellationRequested) throw;
+            throw new TimeoutException("Instagram スクレイピングがタイムアウトしました");
+        }
+
+        if (process.ExitCode == 2)
+        {
+            throw new InvalidOperationException(
+                "instaloader パッケージがインストールされていません。アプリケーションを再起動してください。");
+        }
+
+        if (process.ExitCode == 3)
+        {
+            // セッション切れ: セッション関連ファイルを削除
+            try
+            {
+                if (Directory.Exists(sessionDir))
+                    Directory.Delete(sessionDir, true);
+            }
+            catch { /* 削除失敗は無視 */ }
+            throw new InvalidOperationException(
+                "Instagramのセッションが無効です。再度実行するとログイン入力が求められます。");
+        }
+
+        if (process.ExitCode == 4)
+        {
+            throw new InvalidOperationException(
+                "Instagramのログイン情報が入力されませんでした。再度実行してログイン情報を入力してください。");
+        }
+
+        if (process.ExitCode != 0)
+        {
+            throw new InvalidOperationException(
+                $"Instagramスクレイピングスクリプトがエラーで終了しました (終了コード: {process.ExitCode})");
+        }
+
+        _logMessage($"Instagram スクレイピング完了なのだ: @{username}");
+    }
+
+    /// <summary>
+    /// Instagram ログイン情報の入力をコールバック経由で取得し、プロセスの stdin に送信する
+    /// </summary>
+    private async Task HandleInstagramLoginInputAsync(Process process)
+    {
+        try
+        {
+            if (InstagramLoginCallback is null)
+            {
+                _logError("Instagram ログインコールバックが設定されていないのだ。");
+                process.StandardInput.Close();
+                return;
+            }
+
+            _statusCallback?.Invoke("Instagramのログイン情報を入力してください...");
+
+            var result = await InstagramLoginCallback("Instagramにログインするために、ユーザー名とパスワードを入力してください。");
+            if (result is null)
+            {
+                _logMessage("ログインがキャンセルされたのだ。");
+                process.StandardInput.Close();
+                return;
+            }
+
+            await process.StandardInput.WriteLineAsync(result.Value.Username);
+            await process.StandardInput.WriteLineAsync(result.Value.Password);
+            await process.StandardInput.FlushAsync();
+            _logMessage("ログイン情報を送信したのだ。認証中...");
+            _statusCallback?.Invoke("Instagram 認証中...");
+        }
+        catch (Exception ex)
+        {
+            _logError($"ログイン情報の送信中にエラー: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Instagram 2FAコードの入力をコールバック経由で取得し、プロセスの stdin に送信する
+    /// </summary>
+    private async Task HandleInstagram2FAInputAsync(Process process)
+    {
+        try
+        {
+            if (Instagram2FACallback is null)
+            {
+                _logError("Instagram 2FAコールバックが設定されていないのだ。");
+                process.StandardInput.Close();
+                return;
+            }
+
+            _statusCallback?.Invoke("2段階認証コードを入力してください...");
+
+            var code = await Instagram2FACallback("Instagramの2段階認証コードを入力してください。");
+            if (code is null)
+            {
+                _logMessage("2FA入力がキャンセルされたのだ。");
+                process.StandardInput.Close();
+                return;
+            }
+
+            await process.StandardInput.WriteLineAsync(code);
+            await process.StandardInput.FlushAsync();
+            _logMessage("2FAコードを送信したのだ。認証中...");
+            _statusCallback?.Invoke("Instagram 2FA認証中...");
+        }
+        catch (Exception ex)
+        {
+            _logError($"2FAコードの送信中にエラー: {ex.Message}");
+        }
+    }
+
+    /// <summary>
     /// パッケージがインストールされているかチェックする（ProcessHelper 使用）
     /// </summary>
     private async Task<bool> CheckPackageInstalledAsync(string packageName, CancellationToken ct)
@@ -505,6 +751,115 @@ public sealed class PlaywrightScraperService
             _logMessage($"{packageName} のインストール/更新完了なのだ");
         else
             _logError($"{packageName} のインストール/更新に失敗したのだ");
+    }
+
+    // ────────────────────────────────────────────
+    //  Instagram 進捗解析
+    // ────────────────────────────────────────────
+
+    // Instagram 用ログパターン（事前コンパイル）
+    private static readonly Regex IgPostProgressPattern = new(
+        @"投稿 (\d+):", RegexOptions.Compiled);
+    private static readonly Regex IgProgressSummaryPattern = new(
+        @"進捗: (\d+)/(\d+) 投稿処理済み", RegexOptions.Compiled);
+    private static readonly Regex IgCompletionPattern = new(
+        @"=== 完了! 投稿: (\d+)/(\d+), DL: (\d+)", RegexOptions.Compiled);
+
+    /// <summary>
+    /// Python スクリプトの stdout ログを解析し、Instagram の進捗表示を更新する
+    /// </summary>
+    private void UpdateInstagramStatus(string logLine, string username)
+    {
+        if (_statusCallback is null) return;
+
+        // セッション確認
+        if (logLine.Contains("保存済みプロファイルでセッション確認"))
+        {
+            _statusCallback($"@{username}: セッション確認中...");
+            return;
+        }
+        if (logLine.Contains("セッション復元に成功"))
+        {
+            _statusCallback($"@{username}: セッション復元完了");
+            return;
+        }
+        if (logLine.Contains("保存済みセッションが有効"))
+        {
+            _statusCallback($"@{username}: セッション有効！準備中...");
+            return;
+        }
+        if (logLine.Contains("ブラウザが開きました"))
+        {
+            _statusCallback($"@{username}: ブラウザにログインしてください");
+            return;
+        }
+        if (logLine.Contains("ログイン待機中"))
+        {
+            _statusCallback($"@{username}: ログイン待機中...");
+            return;
+        }
+        if (logLine.Contains("ログイン完了を検知") || logLine.Contains("ログイン成功"))
+        {
+            _statusCallback($"@{username}: ログイン成功！準備中...");
+            return;
+        }
+
+        // プロフィール取得
+        if (logLine.Contains("プロフィール取得完了"))
+        {
+            _statusCallback($"@{username}: プロフィール取得完了！メディアDL開始...");
+            return;
+        }
+
+        // Phase 2
+        if (logLine.Contains("Phase 2: メディアダウンロード"))
+        {
+            _statusCallback($"@{username}: メディアダウンロード中...");
+            return;
+        }
+
+        // 進捗サマリー
+        var summaryMatch = IgProgressSummaryPattern.Match(logLine);
+        if (summaryMatch.Success)
+        {
+            var current = summaryMatch.Groups[1].Value;
+            var total = summaryMatch.Groups[2].Value;
+            _statusCallback($"@{username}: メディアDL中... ({current}/{total} 投稿)");
+            return;
+        }
+
+        // 個別投稿処理
+        var postMatch = IgPostProgressPattern.Match(logLine);
+        if (postMatch.Success)
+        {
+            var postNum = postMatch.Groups[1].Value;
+            _statusCallback($"@{username}: 投稿 #{postNum} を処理中...");
+            return;
+        }
+
+        // 完了
+        var completionMatch = IgCompletionPattern.Match(logLine);
+        if (completionMatch.Success)
+        {
+            var total = completionMatch.Groups[1].Value;
+            var downloaded = completionMatch.Groups[3].Value;
+            _statusCallback($"@{username}: 完了！ {total}投稿, {downloaded}件DL");
+            return;
+        }
+
+        // レートリミット
+        if (logLine.Contains("レートリミット検出"))
+        {
+            _statusCallback($"@{username}: レートリミット待機中...");
+            return;
+        }
+
+        // メタデータ削除
+        if (logLine.Contains("メタデータファイル"))
+        {
+            _statusCallback($"@{username}: クリーンアップ中...");
+            return;
+        }
     }
 
     // ────────────────────────────────────────────
