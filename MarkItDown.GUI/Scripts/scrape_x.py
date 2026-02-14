@@ -45,6 +45,84 @@ def check_playwright():
         return False
 
 
+def _load_browser_cookies():
+    """
+    browser_cookie3 で通常ブラウザの Cookie を取得する。
+    取得対象は x.com / twitter.com のみ。
+    """
+    try:
+        import browser_cookie3
+    except ImportError:
+        log("browser-cookie3 が未インストールのため、通常ブラウザのCookie取得をスキップするのだ。")
+        return []
+
+    cookie_sources = [browser_cookie3.chrome, browser_cookie3.edge, browser_cookie3.brave]
+    domains = [".x.com", ".twitter.com"]
+    result = []
+    seen = set()
+
+    for source in cookie_sources:
+        for domain in domains:
+            try:
+                jar = source(domain_name=domain)
+            except Exception:
+                continue
+            for c in jar:
+                key = (c.name, c.domain, c.path)
+                if key in seen:
+                    continue
+                if not c.name or not c.value:
+                    continue
+                seen.add(key)
+                result.append(c)
+
+    return result
+
+
+def _convert_cookie_for_playwright(cookie) -> dict:
+    """cookiejar の Cookie を Playwright 用 dict に変換する。"""
+    data = {
+        "name": cookie.name,
+        "value": cookie.value,
+        "domain": cookie.domain,
+        "path": cookie.path or "/",
+        "secure": bool(cookie.secure),
+        "httpOnly": "httponly" in str(cookie._rest).lower(),
+    }
+    if isinstance(cookie.expires, int) and cookie.expires > 0:
+        data["expires"] = cookie.expires
+    return data
+
+
+def _inject_browser_cookies(context) -> bool:
+    """
+    通常ブラウザの Cookie を Playwright context に注入する。
+    成功時は True を返す。
+    """
+    cookies = _load_browser_cookies()
+    if not cookies:
+        log("通常ブラウザのX Cookieを取得できなかったのだ。")
+        return False
+
+    try:
+        pw_cookies = [_convert_cookie_for_playwright(c) for c in cookies]
+        context.add_cookies(pw_cookies)
+        log(f"通常ブラウザから Cookie {len(pw_cookies)} 件を注入したのだ。")
+        return True
+    except Exception as e:
+        log(f"Cookie注入中にエラー: {e}")
+        return False
+
+
+def _has_auth_cookies(context) -> bool:
+    """X のログイン維持に必要な Cookie(auth_token/ct0) があるか確認する。"""
+    try:
+        cookie_names = {c.get("name", "") for c in context.cookies("https://x.com")}
+        return "auth_token" in cookie_names and "ct0" in cookie_names
+    except Exception:
+        return False
+
+
 def convert_image_url_to_orig(url: str) -> tuple[str, str]:
     """
     画像URLをオリジナル品質に変換する。
@@ -236,13 +314,19 @@ def _launch_persistent(playwright_module, user_data_dir: str, headless: bool):
     return context
 
 
-def _is_logged_in(page) -> bool:
+def _is_logged_in(page, context=None) -> bool:
     """
     ページの状態からX.comにログイン済みかどうかを判定する。
     URLだけでなくDOM要素も確認する（headlessではリダイレクトされない場合がある）。
     """
     current_url = page.url
     log(f"ログイン状態確認中... URL: {current_url}")
+
+    # auth_token/ct0 Cookie があればまず有効とみなす
+    if context is not None and _has_auth_cookies(context):
+        log("auth_token/ct0 Cookieを検出したのだ")
+        if "/login" not in current_url and "/i/flow/login" not in current_url:
+            return True
 
     # 明らかにログインページの場合
     if "/login" in current_url or "/i/flow/login" in current_url:
@@ -305,18 +389,23 @@ def ensure_login(playwright_module, session_path: str) -> tuple:
     log("保存済みプロファイルでセッション確認中なのだ（headedモード）...")
     context = _launch_persistent(playwright_module, user_data_dir, headless=False)
     page = context.pages[0] if context.pages else context.new_page()
+
+    # 既存プロファイルが未ログインの場合に備え、通常ブラウザCookieを先に注入する
+    _inject_browser_cookies(context)
+
     page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=30000)
     time.sleep(5)  # X.comの初期ロードに十分な時間を確保
 
-    if _is_logged_in(page):
+    if _is_logged_in(page, context):
         log("セッション復元に成功したのだ！")
         return context, page
 
     # 未ログイン → そのまま headed で手動ログイン待ち
-    log("未ログイン状態なのだ。ブラウザでログインしてください...")
+    log("未ログイン状態なのだ。")
+    log("対処法: 通常のChromeブラウザで x.com にログインしてから再実行してください。")
+    log("このスクリプトは通常ブラウザCookieを自動取り込みしてログインを復元するのだ。")
     context.close()
-
-    return _manual_login(playwright_module, user_data_dir)
+    sys.exit(3)
 
 
 def _manual_login(playwright_module, user_data_dir: str) -> tuple:
@@ -354,7 +443,7 @@ def _manual_login(playwright_module, user_data_dir: str) -> tuple:
             log(f"ログインページ以外に遷移を検知: {current_url}")
             # 少し待ってからDOM確認（ページ読み込み完了を待つ）
             time.sleep(2)
-            if _is_logged_in(page):
+            if _is_logged_in(page, context):
                 log(f"ログイン完了を検知したのだ！ URL: {current_url}")
                 break
 
@@ -536,7 +625,7 @@ def scrape_tweets(page, username: str) -> list[dict]:
         sys.exit(3)
 
     # ログイン状態を再確認（DOM検査）
-    if not _is_logged_in(page):
+    if not _is_logged_in(page, None):
         log("検索ページでログインが確認できないのだ。再ログインが必要なのだ。")
         sys.exit(3)
 

@@ -22,18 +22,6 @@ public sealed class PlaywrightScraperService
     private string? _claudeNodePath;
     private string? _claudeCliPath;
 
-    /// <summary>
-    /// Instagram ログイン情報を要求するコールバック。
-    /// 引数はプロンプトメッセージ、戻り値は (username, password)。null ならキャンセル。
-    /// </summary>
-    public Func<string, Task<(string Username, string Password)?>>? InstagramLoginCallback { get; set; }
-
-    /// <summary>
-    /// Instagram 2FAコードを要求するコールバック。
-    /// 引数はプロンプトメッセージ、戻り値はコード文字列。null ならキャンセル。
-    /// </summary>
-    public Func<string, Task<string?>>? Instagram2FACallback { get; set; }
-
     public PlaywrightScraperService(string pythonExecutablePath, Action<string> logMessage, Action<string>? statusCallback = null, Action<string>? logError = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
@@ -52,7 +40,7 @@ public sealed class PlaywrightScraperService
     }
 
     /// <summary>
-    /// 必要な Python パッケージ (playwright, openai) がインストールされているかチェックし、
+    /// 必要な Python パッケージ (playwright) がインストールされているかチェックし、
     /// なければインストール、あれば最新バージョンに更新する
     /// </summary>
     public async Task EnsureDependenciesInstalledAsync(CancellationToken ct = default)
@@ -71,17 +59,6 @@ public sealed class PlaywrightScraperService
             _logMessage("playwright パッケージの最新バージョンを確認中なのだ...");
         }
         await InstallPackageAsync("playwright", ct);
-
-        // openai パッケージチェック・更新
-        if (!await CheckPackageInstalledAsync("openai", ct))
-        {
-            _logMessage("openai パッケージをインストール中なのだ...");
-        }
-        else
-        {
-            _logMessage("openai パッケージの最新バージョンを確認中なのだ...");
-        }
-        await InstallPackageAsync("openai", ct);
 
         _dependenciesInstalled = true;
     }
@@ -338,6 +315,13 @@ public sealed class PlaywrightScraperService
             await InstallPackageAsync("httpx", ct);
         }
 
+        // browser-cookie3 パッケージの追加インストール（通常ChromeのCookie取り込み用）
+        if (!await CheckPackageInstalledAsync("browser_cookie3", ct))
+        {
+            _logMessage("browser-cookie3 パッケージをインストール中なのだ...");
+            await InstallPackageAsync("browser-cookie3", ct);
+        }
+
         var appDir = Directory.GetCurrentDirectory();
         var scriptPath = Path.Combine(appDir, "Scripts", "scrape_x.py");
 
@@ -474,6 +458,17 @@ public sealed class PlaywrightScraperService
     {
         await EnsureDependenciesInstalledAsync(ct);
 
+        // openai パッケージの追加インストール
+        if (!await CheckPackageInstalledAsync("openai", ct))
+        {
+            _logMessage("openai パッケージをインストール中なのだ...");
+        }
+        else
+        {
+            _logMessage("openai パッケージの最新バージョンを確認中なのだ...");
+        }
+        await InstallPackageAsync("openai", ct);
+
         // instaloader パッケージの追加インストール
         if (!await CheckPackageInstalledAsync("instaloader", ct))
         {
@@ -484,13 +479,6 @@ public sealed class PlaywrightScraperService
             _logMessage("instaloader パッケージの最新バージョンを確認中なのだ...");
         }
         await InstallPackageAsync("instaloader", ct);
-
-        // pycryptodomex パッケージの追加インストール（ブラウザCookie復号用）
-        if (!await CheckPackageInstalledAsync("Cryptodome", ct))
-        {
-            _logMessage("pycryptodomex パッケージをインストール中なのだ...");
-            await InstallPackageAsync("pycryptodomex", ct);
-        }
 
         var appDir = Directory.GetCurrentDirectory();
         var scriptPath = Path.Combine(appDir, "Scripts", "scrape_instagram.py");
@@ -510,7 +498,6 @@ public sealed class PlaywrightScraperService
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
-            RedirectStandardInput = true, // stdin でログイン情報を送信
             CreateNoWindow = true,
             StandardOutputEncoding = Encoding.UTF8,
             StandardErrorEncoding = Encoding.UTF8
@@ -546,24 +533,13 @@ public sealed class PlaywrightScraperService
 
         ResetIdleTimer();
 
-        // [INPUT_REQUIRED] 検知用のイベントベースハンドラ
-        process.OutputDataReceived += async (_, e) =>
+        process.OutputDataReceived += (_, e) =>
         {
             if (string.IsNullOrEmpty(e.Data)) return;
 
             _logMessage(e.Data);
             ResetIdleTimer();
             UpdateInstagramStatus(e.Data, username);
-
-            // ログイン情報の入力要求を検知
-            if (e.Data.Contains("[INPUT_REQUIRED] LOGIN"))
-            {
-                await HandleInstagramLoginInputAsync(process);
-            }
-            else if (e.Data.Contains("[INPUT_REQUIRED] 2FA"))
-            {
-                await HandleInstagram2FAInputAsync(process);
-            }
         };
         process.ErrorDataReceived += (_, e) =>
         {
@@ -608,13 +584,7 @@ public sealed class PlaywrightScraperService
             }
             catch { /* 削除失敗は無視 */ }
             throw new InvalidOperationException(
-                "Instagramのセッションが無効です。再度実行するとログイン入力が求められます。");
-        }
-
-        if (process.ExitCode == 4)
-        {
-            throw new InvalidOperationException(
-                "Instagramのログイン情報が入力されませんでした。再度実行してログイン情報を入力してください。");
+                "Instagramのセッションが無効です。再度実行するとブラウザが開くので、ログインしてください。");
         }
 
         if (process.ExitCode != 0)
@@ -624,77 +594,6 @@ public sealed class PlaywrightScraperService
         }
 
         _logMessage($"Instagram スクレイピング完了なのだ: @{username}");
-    }
-
-    /// <summary>
-    /// Instagram ログイン情報の入力をコールバック経由で取得し、プロセスの stdin に送信する
-    /// </summary>
-    private async Task HandleInstagramLoginInputAsync(Process process)
-    {
-        try
-        {
-            if (InstagramLoginCallback is null)
-            {
-                _logError("Instagram ログインコールバックが設定されていないのだ。");
-                process.StandardInput.Close();
-                return;
-            }
-
-            _statusCallback?.Invoke("Instagramのログイン情報を入力してください...");
-
-            var result = await InstagramLoginCallback("Instagramにログインするために、ユーザー名とパスワードを入力してください。");
-            if (result is null)
-            {
-                _logMessage("ログインがキャンセルされたのだ。");
-                process.StandardInput.Close();
-                return;
-            }
-
-            await process.StandardInput.WriteLineAsync(result.Value.Username);
-            await process.StandardInput.WriteLineAsync(result.Value.Password);
-            await process.StandardInput.FlushAsync();
-            _logMessage("ログイン情報を送信したのだ。認証中...");
-            _statusCallback?.Invoke("Instagram 認証中...");
-        }
-        catch (Exception ex)
-        {
-            _logError($"ログイン情報の送信中にエラー: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Instagram 2FAコードの入力をコールバック経由で取得し、プロセスの stdin に送信する
-    /// </summary>
-    private async Task HandleInstagram2FAInputAsync(Process process)
-    {
-        try
-        {
-            if (Instagram2FACallback is null)
-            {
-                _logError("Instagram 2FAコールバックが設定されていないのだ。");
-                process.StandardInput.Close();
-                return;
-            }
-
-            _statusCallback?.Invoke("2段階認証コードを入力してください...");
-
-            var code = await Instagram2FACallback("Instagramの2段階認証コードを入力してください。");
-            if (code is null)
-            {
-                _logMessage("2FA入力がキャンセルされたのだ。");
-                process.StandardInput.Close();
-                return;
-            }
-
-            await process.StandardInput.WriteLineAsync(code);
-            await process.StandardInput.FlushAsync();
-            _logMessage("2FAコードを送信したのだ。認証中...");
-            _statusCallback?.Invoke("Instagram 2FA認証中...");
-        }
-        catch (Exception ex)
-        {
-            _logError($"2FAコードの送信中にエラー: {ex.Message}");
-        }
     }
 
     /// <summary>

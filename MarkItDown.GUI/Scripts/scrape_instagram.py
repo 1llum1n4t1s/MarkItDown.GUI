@@ -3,13 +3,15 @@
 Instagram 専用スクレイピングスクリプト。
 指定ユーザーの全投稿の画像・動画をダウンロードする。
 
-認証フロー（優先順位順）:
-  1. 保存済みセッションファイルがあれば Instaloader に読み込んで検証
-  2. ブラウザ (Chrome/Firefox/Edge) のCookieから自動取得（browser_cookie3）
-  3. stdin経由でユーザー名/パスワードを受け取りInstaloaderでログイン
+認証フロー:
+  1. 保存済みInstaloaderセッションがあれば検証
+  2. Playwright persistent context でログイン確認
+     - 未ログイン時はブラウザを表示して手動ログイン待機
+     - Cookieを抽出して Instaloader にセット
+  3. Instaloaderでメディアダウンロード
 
 Usage:
-    python scrape_instagram.py <target_username> <output_dir>
+    python scrape_instagram.py <target_username_or_url> <output_dir>
 
 環境変数:
     IG_SESSION_DIR: セッションファイル保存ディレクトリ
@@ -19,7 +21,6 @@ Usage:
     1: 致命的エラー
     2: instaloader 未インストール
     3: セッション切れ（再ログインが必要）
-    4: ログイン情報が必要（C#側からのstdin入力待ち失敗）
 """
 
 import json
@@ -47,7 +48,7 @@ def check_dependencies() -> bool:
 
 
 # ────────────────────────────────────────────
-#  セッション管理
+#  Instaloaderセッション管理
 # ────────────────────────────────────────────
 
 def _get_session_file(session_dir: str, ig_username: str) -> str:
@@ -122,396 +123,183 @@ def _try_load_session(L, session_dir: str) -> str | None:
 
 
 # ────────────────────────────────────────────
-#  ブラウザCookie自動取得（直接SQLite読み取り）
+#  Playwright persistent context でCookie取得
 # ────────────────────────────────────────────
 
-def _get_chrome_cookies_paths() -> list[tuple[str, str]]:
-    """Chrome系ブラウザのCookieファイルパスとLocal Stateパスのリストを返す。"""
-    results = []
-    local_app = os.environ.get("LOCALAPPDATA", "")
-    if not local_app:
-        return results
-
-    browsers = [
-        ("Chrome", os.path.join(local_app, "Google", "Chrome", "User Data")),
-        ("Edge", os.path.join(local_app, "Microsoft", "Edge", "User Data")),
-        ("Brave", os.path.join(local_app, "BraveSoftware", "Brave-Browser", "User Data")),
-    ]
-
-    for name, user_data_dir in browsers:
-        if not os.path.isdir(user_data_dir):
-            continue
-        local_state = os.path.join(user_data_dir, "Local State")
-        if not os.path.isfile(local_state):
-            continue
-        # Default プロファイルと Profile 1〜5 を探索
-        for profile in ["Default", "Profile 1", "Profile 2", "Profile 3", "Profile 4", "Profile 5"]:
-            cookie_file = os.path.join(user_data_dir, profile, "Network", "Cookies")
-            if not os.path.isfile(cookie_file):
-                cookie_file = os.path.join(user_data_dir, profile, "Cookies")
-            if os.path.isfile(cookie_file):
-                results.append((f"{name} ({profile})", cookie_file, local_state))
-    return results
+BROWSER_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-first-run",
+    "--no-default-browser-check",
+    "--disable-infobars",
+    "--disable-extensions",
+    "--disable-component-extensions-with-background-pages",
+    "--disable-default-apps",
+    "--disable-hang-monitor",
+    "--disable-popup-blocking",
+    "--metrics-recording-only",
+    "--no-service-autorun",
+    "--password-store=basic",
+]
 
 
-def _decrypt_chrome_cookie_value(encrypted_value: bytes, key: bytes) -> str | None:
-    """Chrome v10+ のAES-GCM暗号化Cookieを復号する。"""
-    try:
-        if encrypted_value[:3] == b"v10" or encrypted_value[:3] == b"v20":
-            # v10/v20: AES-256-GCM
-            nonce = encrypted_value[3:15]
-            ciphertext = encrypted_value[15:]
-            from Cryptodome.Cipher import AES
-            cipher = AES.new(key, AES.MODE_GCM, nonce=nonce)
-            # 最後の16バイトがタグ
-            decrypted = cipher.decrypt_and_verify(ciphertext[:-16], ciphertext[-16:])
-            return decrypted.decode("utf-8", errors="replace")
-        else:
-            # 非暗号化 or DPAPI (旧Windows)
-            try:
-                import ctypes
-                import ctypes.wintypes
-                class DATA_BLOB(ctypes.Structure):
-                    _fields_ = [("cbData", ctypes.wintypes.DWORD),
-                                ("pbData", ctypes.POINTER(ctypes.c_char))]
-                blob_in = DATA_BLOB(len(encrypted_value), ctypes.create_string_buffer(encrypted_value, len(encrypted_value)))
-                blob_out = DATA_BLOB()
-                if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
-                    raw = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-                    ctypes.windll.kernel32.LocalFree(blob_out.pbData)
-                    return raw.decode("utf-8", errors="replace")
-            except Exception:
-                pass
-            return None
-    except Exception:
-        return None
+def _get_ig_user_data_dir(session_dir: str) -> str:
+    """persistent context 用の User Data Directory を返す。"""
+    profile_dir = os.path.join(session_dir, "ig_profile")
+    os.makedirs(profile_dir, exist_ok=True)
+    return profile_dir
 
 
-def _get_chrome_encryption_key(local_state_path: str) -> bytes | None:
-    """Chrome Local State ファイルから暗号化キーを取得する。"""
-    try:
-        with open(local_state_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        encrypted_key_b64 = data["os_crypt"]["encrypted_key"]
-        import base64
-        encrypted_key = base64.b64decode(encrypted_key_b64)
-        # "DPAPI" プレフィックスを除去
-        encrypted_key = encrypted_key[5:]
-        # DPAPI で復号
-        import ctypes
-        import ctypes.wintypes
-        class DATA_BLOB(ctypes.Structure):
-            _fields_ = [("cbData", ctypes.wintypes.DWORD),
-                        ("pbData", ctypes.POINTER(ctypes.c_char))]
-        blob_in = DATA_BLOB(len(encrypted_key), ctypes.create_string_buffer(encrypted_key, len(encrypted_key)))
-        blob_out = DATA_BLOB()
-        if ctypes.windll.crypt32.CryptUnprotectData(ctypes.byref(blob_in), None, None, None, None, 0, ctypes.byref(blob_out)):
-            key = ctypes.string_at(blob_out.pbData, blob_out.cbData)
-            ctypes.windll.kernel32.LocalFree(blob_out.pbData)
-            return key
-        return None
-    except Exception as e:
-        log(f"暗号化キー取得エラー: {e}")
-        return None
-
-
-def _copy_locked_file(src: str, dst: str) -> bool:
+def _launch_persistent(playwright_module, user_data_dir: str):
     """
-    ロックされたファイルをコピーする。複数の方法を試行。
-    1. shutil.copy2（通常コピー）
-    2. バイナリ読み込み（共有モード）
-    3. Win32 CopyFile API
-    4. sqlite3 backup API（SQLiteファイル用）
-    5. Win32 CreateFile (FILE_SHARE_READ|WRITE|DELETE) + ReadFile
+    persistent context でブラウザを起動する。
+    channel="chrome" を優先し、失敗時は Chromium にフォールバックする。
     """
-    import shutil
-
-    # 方法1: 通常コピー
+    vp_width = 1280 + random.randint(-40, 40)
+    vp_height = 900 + random.randint(-30, 30)
+    launch_kwargs = dict(
+        user_data_dir=user_data_dir,
+        headless=False,
+        args=BROWSER_ARGS,
+        viewport={"width": vp_width, "height": vp_height},
+        locale="ja-JP",
+    )
     try:
-        shutil.copy2(src, dst)
-        log(f"  コピー成功（shutil.copy2）")
-        return True
-    except (OSError, PermissionError) as e:
-        log(f"  shutil.copy2 失敗: {e}")
-
-    # 方法2: バイナリ読み込み（Python open）
-    try:
-        with open(src, "rb") as f_in:
-            data = f_in.read()
-        with open(dst, "wb") as f_out:
-            f_out.write(data)
-        log(f"  コピー成功（open rb）")
-        return True
-    except (OSError, PermissionError) as e:
-        log(f"  open(rb) 失敗: {e}")
-
-    # 方法3: Win32 CopyFileW API
-    try:
-        import ctypes
-        result = ctypes.windll.kernel32.CopyFileW(src, dst, False)
-        if result:
-            log(f"  コピー成功（Win32 CopyFileW）")
-            return True
-        else:
-            err = ctypes.get_last_error()
-            log(f"  Win32 CopyFileW 失敗: error={err}")
-    except Exception as e:
-        log(f"  Win32 CopyFileW 例外: {e}")
-
-    # 方法4: sqlite3 backup API
-    try:
-        import sqlite3
-        src_conn = sqlite3.connect(f"file:{src}?mode=ro&nolock=1", uri=True)
-        dst_conn = sqlite3.connect(dst)
-        src_conn.backup(dst_conn)
-        dst_conn.close()
-        src_conn.close()
-        log(f"  コピー成功（sqlite3 backup）")
-        return True
-    except Exception as e:
-        log(f"  sqlite3 backup 失敗: {e}")
-
-    # 方法5: Win32 CreateFile with full share mode
-    try:
-        import ctypes
-        import ctypes.wintypes
-
-        GENERIC_READ = 0x80000000
-        FILE_SHARE_READ = 0x00000001
-        FILE_SHARE_WRITE = 0x00000002
-        FILE_SHARE_DELETE = 0x00000004
-        OPEN_EXISTING = 3
-        FILE_ATTRIBUTE_NORMAL = 0x80
-        INVALID_HANDLE_VALUE = ctypes.wintypes.HANDLE(-1).value
-
-        handle = ctypes.windll.kernel32.CreateFileW(
-            src,
-            GENERIC_READ,
-            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
-            None,
-            OPEN_EXISTING,
-            FILE_ATTRIBUTE_NORMAL,
-            None,
+        context = playwright_module.chromium.launch_persistent_context(
+            channel="chrome",
+            **launch_kwargs,
         )
-        if handle == INVALID_HANDLE_VALUE:
-            err = ctypes.get_last_error()
-            log(f"  Win32 CreateFileW 失敗: error={err}")
-        else:
-            # ファイルサイズ取得
-            file_size = ctypes.wintypes.DWORD(0)
-            ctypes.windll.kernel32.GetFileSize(handle, ctypes.byref(file_size))
-            size = file_size.value
-            if size == 0xFFFFFFFF:
-                size = 0  # サイズ取得失敗の場合
-
-            # チャンクで読み込み
-            buf = ctypes.create_string_buffer(1024 * 1024)  # 1MB
-            bytes_read = ctypes.wintypes.DWORD(0)
-            chunks = []
-            while True:
-                success = ctypes.windll.kernel32.ReadFile(
-                    handle, buf, len(buf), ctypes.byref(bytes_read), None
-                )
-                if not success or bytes_read.value == 0:
-                    break
-                chunks.append(buf.raw[:bytes_read.value])
-
-            ctypes.windll.kernel32.CloseHandle(handle)
-
-            data = b"".join(chunks)
-            if data:
-                with open(dst, "wb") as f_out:
-                    f_out.write(data)
-                log(f"  コピー成功（Win32 CreateFileW, {len(data)} bytes）")
-                return True
-            else:
-                log(f"  Win32 CreateFileW: 読み取りデータが空")
+        log("システムの Chrome (persistent) で起動したのだ")
     except Exception as e:
-        log(f"  Win32 CreateFileW 例外: {e}")
+        log(f"Chrome での起動に失敗、Chromium にフォールバック: {e}")
+        context = playwright_module.chromium.launch_persistent_context(
+            **launch_kwargs,
+        )
+        log("Playwright Chromium (persistent) で起動したのだ")
+    return context
 
-    return False
 
-
-def _read_chrome_cookies(cookie_file: str, local_state_path: str, domain: str) -> dict[str, str]:
-    """
-    Chrome系ブラウザのCookieファイルをコピーしてSQLiteで読み取り、
-    指定ドメインのCookieを復号して返す。
-    ブラウザ起動中でもファイルコピーで対応。
-    """
-    import sqlite3
-    import tempfile
-
-    # 暗号化キーを取得
-    key = _get_chrome_encryption_key(local_state_path)
-    if not key:
-        log("暗号化キーの取得に失敗したのだ。")
-        return {}
-
-    # Cookieファイルを一時ファイルにコピー（ブラウザ起動中のロック回避）
+def _collect_instagram_cookies(context) -> dict[str, str]:
+    """Playwright context から Instagram Cookie を収集する。"""
     cookies = {}
-    tmp_path = None
-    tmp_wal = None
     try:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
-            tmp_path = tmp.name
-
-        if not _copy_locked_file(cookie_file, tmp_path):
-            log(f"Cookieファイルのコピーに全て失敗したのだ: {cookie_file}")
-            return {}
-
-        # WAL ファイルもコピー（存在すれば）
-        wal_file = cookie_file + "-wal"
-        if os.path.exists(wal_file):
-            tmp_wal = tmp_path + "-wal"
-            _copy_locked_file(wal_file, tmp_wal)
-
-        conn = sqlite3.connect(tmp_path)
-        conn.text_factory = bytes
-        cursor = conn.cursor()
-        cursor.execute(
-            "SELECT name, encrypted_value, host_key FROM cookies WHERE host_key LIKE ?",
-            (f"%{domain}%",)
-        )
-        for name_bytes, encrypted_value, host_key_bytes in cursor.fetchall():
-            name = name_bytes.decode("utf-8", errors="replace") if isinstance(name_bytes, bytes) else name_bytes
-            value = _decrypt_chrome_cookie_value(encrypted_value, key)
-            if value:
+        for cookie in context.cookies("https://www.instagram.com"):
+            name = cookie.get("name", "")
+            value = cookie.get("value", "")
+            if name and value:
                 cookies[name] = value
-        conn.close()
     except Exception as e:
-        log(f"Cookie読み取りエラー: {e}")
-    finally:
-        for p in [tmp_path, tmp_wal]:
-            if p and os.path.exists(p):
-                try:
-                    os.remove(p)
-                except OSError:
-                    pass
-
+        log(f"Cookie収集中にエラー: {e}")
     return cookies
 
 
-def _try_import_browser_cookies(L, session_dir: str) -> str | None:
+def _is_logged_in(page, context) -> bool:
     """
-    Chrome系ブラウザのCookieファイルから直接Instagram Cookieを読み取り、
-    Instaloaderのセッションにセットする。
-    ブラウザが起動中でもファイルコピー方式で対応。
+    Instagram にログイン済みか判定する。
+    sessionid Cookie と URL/DOM の両方を確認する。
     """
-    browser_paths = _get_chrome_cookies_paths()
+    current_url = page.url
+    cookies = _collect_instagram_cookies(context)
+    has_session = bool(cookies.get("sessionid"))
+    if not has_session:
+        return False
+    if "/accounts/login" in current_url:
+        return False
+    try:
+        login_input = page.query_selector('input[name="username"], input[name="password"]')
+        if login_input:
+            return False
+    except Exception:
+        pass
+    return True
 
-    if not browser_paths:
-        log("Chrome系ブラウザのCookieファイルが見つからないのだ。")
+
+def ensure_login_via_playwright(session_dir: str) -> dict[str, str]:
+    """
+    Playwright persistent context でログイン確認し、必要なら手動ログインを待つ。
+    Returns: Instagram Cookie dict
+    """
+    from playwright.sync_api import sync_playwright
+
+    user_data_dir = _get_ig_user_data_dir(session_dir)
+    context = None
+    try:
+        with sync_playwright() as p:
+            log("保存済みプロファイルでInstagramセッション確認中なのだ（headedモード）...")
+            context = _launch_persistent(p, user_data_dir)
+            page = context.pages[0] if context.pages else context.new_page()
+            page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=30000)
+            time.sleep(5)
+
+            if _is_logged_in(page, context):
+                cookies = _collect_instagram_cookies(context)
+                log("保存済みセッションが有効なのだ。")
+                log(f"Instagram Cookieを {len(cookies)} 個取得したのだ。")
+                return cookies
+
+            log("未ログイン状態なのだ。ブラウザでInstagramにログインしてください...")
+            page.goto("https://www.instagram.com/accounts/login/", wait_until="domcontentloaded", timeout=30000)
+            log("ブラウザが開きました。Instagramにログインしてください...")
+            log("ログイン完了を自動検知します。そのままお待ちください。")
+
+            max_wait = 600
+            elapsed = 0
+            poll_interval = 3
+            while elapsed < max_wait:
+                time.sleep(poll_interval)
+                elapsed += poll_interval
+                try:
+                    if _is_logged_in(page, context):
+                        cookies = _collect_instagram_cookies(context)
+                        log("ログイン完了を検知したのだ！")
+                        log(f"Instagram Cookieを {len(cookies)} 個取得したのだ。")
+                        return cookies
+                except Exception as e:
+                    log(f"ログイン状態確認中にエラー: {e}")
+                if elapsed % 30 == 0:
+                    log(f"ログイン待機中... ({elapsed}秒経過, URL: {page.url})")
+
+            log("ログイン待機がタイムアウトしたのだ。(10分)")
+            return {}
+    except Exception as e:
+        log(f"Playwrightログイン処理中にエラー: {e}")
+        return {}
+    finally:
+        if context:
+            try:
+                context.close()
+            except Exception as e:
+                log(f"ブラウザコンテキストのクローズ中にエラー: {e}")
+
+
+def _apply_cookies_to_instaloader(L, cookies: dict[str, str], session_dir: str) -> str | None:
+    """
+    Playwrightから取得したCookieをInstaloaderにセットし、セッションを検証・保存する。
+    成功すればログインユーザー名を返す。
+    """
+    session_id = cookies.get("sessionid")
+    if not session_id:
+        log("Instagram のsessionidが見つからないのだ（ログインしていない可能性）。")
         return None
 
-    for browser_name, cookie_file, local_state in browser_paths:
-        try:
-            log(f"{browser_name} のCookieを確認中...")
-            cookies = _read_chrome_cookies(cookie_file, local_state, "instagram.com")
+    log(f"ChromeのCookieをInstaloaderにセット中... (Cookie数: {len(cookies)})")
 
-            if not cookies:
-                log(f"{browser_name} にInstagramのCookieが見つからないのだ。")
-                continue
+    # Instaloaderのセッションにcookieをセット
+    L.context._session.cookies.update(cookies)
 
-            session_id = cookies.get("sessionid")
-            if not session_id:
-                log(f"{browser_name} にInstagramのsessionidが見つからないのだ（ログインしていない可能性）。")
-                continue
-
-            log(f"{browser_name} からInstagramのセッションCookieを取得したのだ！（Cookie数: {len(cookies)}）")
-
-            # Instaloaderのセッションにcookieをセット
-            L.context._session.cookies.update(cookies)
-
-            # セッション検証
-            test_user = L.test_login()
-            if test_user:
-                log(f"ブラウザCookieでログイン成功: ユーザー = {test_user}")
-                # セッションを保存（次回以降はブラウザ不要）
-                session_file = _get_session_file(session_dir, test_user)
-                L.context.username = test_user
-                L.save_session_to_file(session_file)
-                _save_session_info(session_dir, test_user)
-                log("セッションを保存したのだ。次回以降はブラウザCookie不要。")
-                return test_user
-            else:
-                log(f"{browser_name} のCookieでログインできなかったのだ（セッション期限切れの可能性）。")
-
-        except Exception as e:
-            log(f"{browser_name} のCookie取得中にエラー: {e}")
-            traceback.print_exc()
-
-    return None
-
-
-# ────────────────────────────────────────────
-#  stdin経由のインタラクティブログイン（フォールバック）
-# ────────────────────────────────────────────
-
-def _login_interactive(L, session_dir: str) -> str:
-    """
-    stdin からユーザー名/パスワードを受け取り、Instaloader でログインする。
-    """
-    import instaloader
-
-    log("[INPUT_REQUIRED] LOGIN")
-    log("Instagramのログイン情報を入力してください。")
-
-    try:
-        ig_username = input().strip()
-        ig_password = input().strip()
-    except EOFError:
-        log("ログイン情報の入力を受け取れなかったのだ。")
-        sys.exit(4)
-
-    if not ig_username or not ig_password:
-        log("ユーザー名またはパスワードが空なのだ。")
-        sys.exit(4)
-
-    log(f"ログイン中... (ユーザー: {ig_username})")
-
-    try:
-        L.login(ig_username, ig_password)
-    except instaloader.exceptions.TwoFactorAuthRequiredException:
-        # 2要素認証
-        log("[INPUT_REQUIRED] 2FA")
-        log("2段階認証コードを入力してください。")
-        try:
-            code = input().strip()
-        except EOFError:
-            log("2FAコードの入力を受け取れなかったのだ。")
-            sys.exit(4)
-
-        try:
-            L.two_factor_login(code)
-        except Exception as e:
-            log(f"2段階認証に失敗したのだ: {e}")
-            log("※ InstaloaderのAPIではSMSベースの2FAのみ対応しています。")
-            log("※ 認証アプリ（Google Authenticator等）の2FAは非対応です。")
-            log("※ 代替策: 普段使いのブラウザでInstagramにログインした状態で再実行してください。")
-            log("  ブラウザのCookieから自動的にセッションを取得します。")
-            sys.exit(1)
-
-    except instaloader.exceptions.BadCredentialsException:
-        log("ユーザー名またはパスワードが正しくないのだ。")
-        sys.exit(1)
-
-    except instaloader.exceptions.ConnectionException as e:
-        error_str = str(e).lower()
-        if "checkpoint" in error_str:
-            log(f"Instagramがセキュリティチェックを要求しているのだ。")
-            log("ブラウザでInstagramにログインしてチェックを完了させてから再実行してください。")
-        elif "400" in str(e):
-            log(f"ログインリクエストが拒否されたのだ。しばらく時間を置いてから再試行してください: {e}")
-        else:
-            log(f"ログイン中に接続エラーが発生したのだ: {e}")
-        sys.exit(1)
-
-    # ログイン成功 → セッション保存
-    session_file = _get_session_file(session_dir, ig_username)
-    L.save_session_to_file(session_file)
-    _save_session_info(session_dir, ig_username)
-    log(f"ログイン成功！セッションを保存したのだ。")
-    return ig_username
+    # セッション検証
+    test_user = L.test_login()
+    if test_user:
+        log(f"ChromeからInstaloaderへのセッション転送に成功: ユーザー = {test_user}")
+        # セッションを保存（次回以降はPlaywright不要の可能性あり）
+        session_file = _get_session_file(session_dir, test_user)
+        L.context.username = test_user
+        L.save_session_to_file(session_file)
+        _save_session_info(session_dir, test_user)
+        log("Instaloaderセッションを保存したのだ。")
+        return test_user
+    else:
+        log("CookieをセットしたがInstaloaderのセッション検証に失敗したのだ。")
+        return None
 
 
 # ────────────────────────────────────────────
@@ -716,18 +504,20 @@ def main():
 
     L = _setup_instaloader()
 
-    # 1. 保存済みセッションを試行
+    # 1. 保存済みInstaloaderセッションを試行
     logged_in_user = _try_load_session(L, session_dir)
 
-    # 2. ブラウザCookie自動取得
+    # 2. Playwright persistent context でCookie取得 → Instaloaderにセット
     if not logged_in_user:
-        log("ブラウザのCookieからセッションを取得するのだ...")
-        logged_in_user = _try_import_browser_cookies(L, session_dir)
+        log("PlaywrightブラウザでInstagramのCookieを取得するのだ...")
+        cookies = ensure_login_via_playwright(session_dir)
+        if cookies:
+            logged_in_user = _apply_cookies_to_instaloader(L, cookies, session_dir)
 
-    # 3. フォールバック: stdin経由のインタラクティブログイン
     if not logged_in_user:
-        log("ブラウザCookieからの取得に失敗したのだ。ログイン情報を入力してください。")
-        logged_in_user = _login_interactive(L, session_dir)
+        log("ログインに失敗したのだ。")
+        log("対処法: Chromeブラウザで https://www.instagram.com/ にアクセスしてログイン済みの状態にしてから、再度実行してください。")
+        sys.exit(3)
 
     # メディアダウンロード
     try:

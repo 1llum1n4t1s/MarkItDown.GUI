@@ -12,6 +12,7 @@
 - **Webスクレイピング**: URLを入力するだけでWebページの内容をJSON形式で抽出・保存
   - Reddit: JSON API による高速取得
   - X/Twitter: ユーザーのタイムライン全件取得＋画像オリジナル画質ダウンロード（セッション永続化対応）
+  - Instagram: ユーザーの全投稿メディア（画像・動画）を一括ダウンロード（ブラウザCookie自動認証対応）
   - その他のサイト: HTTP + Claudeガイド型でブラウザを起動せずに高速取得（ページネーション対応）
 - **自動環境構築**: Python環境、FFmpegを初回起動時に自動でダウンロード・セットアップ
 - **OSの環境を汚さないポータブル設計**: Python・FFmpeg・Node.js・Claude Code CLIなど全ての依存コンポーネントをアプリ内の `lib/` フォルダに格納。システムのPATH・レジストリ・既存のPython環境には一切影響しません。アンインストール時もフォルダ削除だけで完全にクリーンアップできます
@@ -19,7 +20,7 @@
 - **3種類のファイル出力**: 元データ・整形済・まとめ済の3ファイルを自動生成（Claude利用時。元データとの比較で整形による情報損失をチェック可能）
 - **並列処理**: 最大3ファイルの同時変換で高速処理
 - **重複処理の回避**: 同じファイルの再処理をキャッシュでスキップ
-- **パッケージ自動更新**: 起動時にPythonパッケージ（markitdown、playwright、httpx）の最新バージョンを自動確認・更新
+- **パッケージ自動更新**: 起動時にPythonパッケージ（markitdown、playwright、httpx、instaloader、openai）の最新バージョンを自動確認・更新
 - **自動アップデート**: アプリ起動時に最新版を自動チェック・適用
 - **モダンなUI**: Avalonia UIを使用した軽量で使いやすいインターフェース（処理中オーバーレイによる進捗表示付き）
 
@@ -98,6 +99,7 @@ Claude利用可能時は以下の3ファイルが出力されます（Claude未�
 |---|---|---|
 | Reddit | JSON API | 投稿・コメントを高速取得 |
 | X/Twitter | Playwright（専用スクリプト） | ユーザータイムライン全件取得、画像オリジナル画質DL、セッション永続化 |
+| Instagram | Instaloader（専用スクリプト） | 全投稿メディアDL、ブラウザCookie自動認証、セッション永続化 |
 | その他 | HTTP + Claude | ブラウザ不使用、HTTPで高速取得（ページネーション対応） |
 
 #### X/Twitter スクレイピング
@@ -124,6 +126,36 @@ X/Twitter のユーザーページURL（例: `x.com/username`）を入力する�
 |---|---|
 | `{username}_元データ_YYYYMMDDHHmmss.json` | 全ツイートのJSON（テキスト・メトリクス・画像情報） |
 | `{username}/` フォルダ | ダウンロードされた画像ファイル群 |
+
+#### Instagram スクレイピング
+
+Instagram のURL（ユーザーページ・投稿・リール）を入力すると、専用スクレイパーが起動します。
+
+**対応URL形式：**
+- ユーザーページ: `instagram.com/username` → 全投稿のメディアを一括ダウンロード
+- 投稿: `instagram.com/p/xxxxxx` → 指定投稿のメディアをダウンロード
+- リール: `instagram.com/reel/xxxxxx` → 指定リールをダウンロード
+
+**主な機能：**
+- ユーザーの全投稿メディア（画像・動画）を自動ダウンロード
+- カルーセル投稿（複数画像/動画）にも対応
+- セッション永続化により2回目以降はログイン不要
+- レートリミット検出時の自動待機
+
+**認証方法（優先順位順）：**
+1. **保存済みセッション**: 前回ログイン時のセッションを自動復元（ログイン操作不要）
+2. **ブラウザCookie自動取得**: Chrome・Edge・Brave で Instagram にログイン済みの場合、Cookie を自動取得してセッションを構築（ブラウザが起動中でも対応）
+3. **ユーザー名/パスワード入力**: ダイアログでログイン情報を入力（SMS 2FA のみ対応。認証アプリの 2FA は Instaloader の制限により非対応）
+
+> **推奨**: 普段使いのブラウザ（Chrome等）で Instagram にログインした状態でアプリを実行すると、認証情報が自動取得されるため最も簡単です。
+
+**出力ファイル：**
+
+| ファイル | 内容 |
+|---|---|
+| `{username}/` フォルダ | ダウンロードされたメディアファイル群（jpg, png, mp4, webp） |
+
+> **注意**: Instagram はメディアファイルのみダウンロードされます（JSONメタデータは自動削除）。Claude整形・まとめ処理はスキップされます。
 
 #### Claudeガイド型スクレイピング（HTTPベース）
 
@@ -192,13 +224,17 @@ Claude Code CLI を使用して、以下のAI連携機能を提供します。**
 | markitdown（最新版） | ファイル変換ライブラリ（pip自動インストール・更新） | Python site-packages |
 | playwright | Webスクレイピング用ブラウザ自動化（pip自動インストール・更新） | Python site-packages |
 | httpx | X/Twitter画像ダウンロード用HTTPクライアント（pip自動インストール・更新） | Python site-packages |
+| instaloader | Instagram投稿メディアダウンロード用ライブラリ（pip自動インストール・更新） | Python site-packages |
+| openai | Instagram投稿キャプション解析用ライブラリ（pip自動インストール・更新） | Python site-packages |
+| browser-cookie3 | X/Twitter用ブラウザCookie自動取得ライブラリ（pip自動インストール） | Python site-packages |
+| pycryptodomex | ブラウザCookie復号用暗号ライブラリ（pip自動インストール） | Python site-packages |
 
 ### OSの環境を汚さないポータブル設計
 
 全ての依存コンポーネントはアプリケーションフォルダ内の `lib/` 配下に自己完結して格納されます。
 
 - **Python**: 公式の埋め込み版（Windows Embeddable Package）を使用。システムにインストール済みのPython環境には一切干渉しません
-- **Pythonパッケージ**: markitdown、playwright、httpx等は埋め込みPython専用の site-packages にインストールされます
+- **Pythonパッケージ**: markitdown、playwright、httpx、instaloader、openai、browser-cookie3、pycryptodomex等は埋め込みPython専用の site-packages にインストールされます
 - **FFmpeg**: `lib/ffmpeg/` に格納。システムのPATHやレジストリは変更しません
 - **Node.js & Claude Code CLI**: `lib/nodejs/` および `lib/npm/` に格納。システムにインストールされたNode.jsとは独立して動作します
 
@@ -215,14 +251,14 @@ Claude Code CLI を使用して、以下のAI連携機能を提供します。**
 
 ## 技術仕様
 
-- **フレームワーク**: Avalonia UI 11.3 / .NET 10.0
+- **フレームワーク**: Avalonia UI 11.3.12 / .NET 10.0
 - **言語**: C# 14 / Python 3.10+
 - **アーキテクチャ**: MVVM (Model-View-ViewModel)
 - **ファイル変換**: Microsoft MarkItDown（Python）
 - **AI連携**: Claude Code CLI（`@anthropic-ai/claude-code`） via Node.js — オプション
-- **Webスクレイピング**: HTTP + BeautifulSoup + Claude（構造分析）による汎用スクレイピング、X/Twitter専用Playwrightスクレイパー
+- **Webスクレイピング**: HTTP + BeautifulSoup + Claude（構造分析）による汎用スクレイピング、X/Twitter専用Playwrightスクレイパー、Instagram専用Instaloaderスクレイパー
 - **自動更新**: Velopack
-- **ログ**: ZLogger（ローリングファイル出力）
+- **ログ**: NLog（ローリングファイル出力）
 
 ## ライセンス
 

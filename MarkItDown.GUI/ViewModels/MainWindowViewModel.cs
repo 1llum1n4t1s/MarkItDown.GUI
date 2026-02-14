@@ -15,6 +15,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private string _logText = "アプリケーションが起動したのだ...\n";
     private IBrush _dropZoneBackground;
     private FileProcessor? _fileProcessor;
+    private MarkItDownProcessor? _markItDownProcessor;
     private ClaudeCodeSetupService? _claudeSetupService;
     private WebScraperService? _webScraperService;
     private bool _isClaudeEnabled;
@@ -202,15 +203,11 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             var ffmpegBinPath = ffmpegManager.IsFfmpegAvailable ? ffmpegManager.FfmpegBinPath : null;
 
             UpdateProcessingStatus("MarkItDownライブラリを準備中...");
-            var markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, logError: LogError);
-            _fileProcessor = new FileProcessor(markItDownProcessor, LogMessage, logError: LogError);
+            _markItDownProcessor = new MarkItDownProcessor(pythonExe, LogMessage, ffmpegBinPath, logError: LogError);
+            _fileProcessor = new FileProcessor(_markItDownProcessor, LogMessage, logError: LogError);
 
             _webScraperService = new WebScraperService(LogMessage, UpdateProcessingStatus, logError: LogError);
             var playwrightScraper = new PlaywrightScraperService(pythonExe, LogMessage, UpdateProcessingStatus, logError: LogError);
-
-            // Instagram ログインコールバックを設定
-            playwrightScraper.InstagramLoginCallback = PromptInstagramLoginAsync;
-            playwrightScraper.Instagram2FACallback = PromptInstagram2FAAsync;
 
             _webScraperService.SetPlaywrightScraper(playwrightScraper);
 
@@ -287,9 +284,10 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                     var nodePath = _claudeSetupService.GetNodePath();
                     var cliJsPath = _claudeSetupService.GetCliJsPath();
 
-                    // WebScraperService と PlaywrightScraperService に Claude 設定を渡す
+                    // WebScraperService、PlaywrightScraperService、MarkItDownProcessor に Claude 設定を渡す
                     _webScraperService?.SetClaudeConfig(nodePath, cliJsPath);
                     _webScraperService?.GetPlaywrightScraper()?.SetClaudeConfig(nodePath, cliJsPath);
+                    _markItDownProcessor?.SetClaudeConfig(nodePath, cliJsPath);
 
                     LogMessage("Claude AI セットアップ完了なのだ！");
                 }
@@ -757,80 +755,6 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     // ────────────────────────────────────────────
     //  Instagram ログインダイアログ
     // ────────────────────────────────────────────
-
-    /// <summary>
-    /// Instagram のログイン情報をUIスレッドでユーザーに入力させる
-    /// </summary>
-    private async Task<(string Username, string Password)?> PromptInstagramLoginAsync(string message)
-    {
-        var tcs = new TaskCompletionSource<(string, string)?>();
-
-        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
-        {
-            try
-            {
-                var dialog = new InstagramLoginDialog();
-                dialog.SetMessage(message);
-                var mainWindow = Avalonia.Application.Current?.ApplicationLifetime is
-                    Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                    ? desktop.MainWindow : null;
-
-                if (mainWindow is not null)
-                {
-                    var result = await dialog.ShowDialog<(string, string)?>(mainWindow);
-                    tcs.TrySetResult(result);
-                }
-                else
-                {
-                    tcs.TrySetResult(null);
-                }
-            }
-            catch (Exception ex)
-            {
-                LogError($"ログインダイアログでエラー: {ex.Message}");
-                tcs.TrySetResult(null);
-            }
-        });
-
-        return await tcs.Task;
-    }
-
-    /// <summary>
-    /// Instagram の2FAコードをUIスレッドでユーザーに入力させる
-    /// </summary>
-    private async Task<string?> PromptInstagram2FAAsync(string message)
-    {
-        var tcs = new TaskCompletionSource<string?>();
-
-        Avalonia.Threading.Dispatcher.UIThread.Post(async () =>
-        {
-            try
-            {
-                var dialog = new Instagram2FADialog();
-                dialog.SetMessage(message);
-                var mainWindow = Avalonia.Application.Current?.ApplicationLifetime is
-                    Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop
-                    ? desktop.MainWindow : null;
-
-                if (mainWindow is not null)
-                {
-                    var result = await dialog.ShowDialog<string?>(mainWindow);
-                    tcs.TrySetResult(result);
-                }
-                else
-                {
-                    tcs.TrySetResult(null);
-                }
-            }
-            catch (Exception ex)
-            {
-                LogError($"2FAダイアログでエラー: {ex.Message}");
-                tcs.TrySetResult(null);
-            }
-        });
-
-        return await tcs.Task;
-    }
 
     /// <summary>
     /// リソースを解放する

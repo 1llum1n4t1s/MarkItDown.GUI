@@ -14,8 +14,8 @@ public class MarkItDownProcessor
     private readonly Action<string> _logMessage;
     private readonly Action<string> _logError;
     private readonly string? _ffmpegBinPath;
-    private readonly string? _claudeNodePath;
-    private readonly string? _claudeCliPath;
+    private string? _claudeNodePath;
+    private string? _claudeCliPath;
 
     /// <summary>
     /// Constructor
@@ -34,6 +34,17 @@ public class MarkItDownProcessor
         _ffmpegBinPath = ffmpegBinPath;
         _claudeNodePath = claudeNodePath;
         _claudeCliPath = claudeCliPath;
+    }
+
+    /// <summary>
+    /// Claude Code CLI 接続情報を後から設定する
+    /// </summary>
+    /// <param name="nodePath">Node.js 実行パス</param>
+    /// <param name="cliJsPath">Claude Code CLI の cli.js パス</param>
+    public void SetClaudeConfig(string nodePath, string cliJsPath)
+    {
+        _claudeNodePath = nodePath;
+        _claudeCliPath = cliJsPath;
     }
 
     /// <summary>

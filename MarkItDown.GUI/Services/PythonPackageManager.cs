@@ -39,37 +39,10 @@ public class PythonPackageManager
         try
         {
             await CheckAndUnifyMarkItDownInstallationAsync();
-            await CheckAndInstallOpenAIPackageAsync();
         }
         catch (Exception ex)
         {
             _logError($"パッケージインストールでエラーなのだ: {ex.Message}");
-        }
-    }
-
-    /// <summary>
-    /// openai パッケージの状態をチェックし、インストールまたは最新バージョンに更新する
-    /// （MarkItDown のネイティブ LLM 統合に必要）
-    /// </summary>
-    private async Task CheckAndInstallOpenAIPackageAsync()
-    {
-        try
-        {
-            if (!await CheckPackageInstalledAsync("openai"))
-            {
-                _logMessage("openaiパッケージが不足しているのでpipでインストールするのだ");
-            }
-            else
-            {
-                _logMessage("openaiパッケージの最新バージョンを確認中なのだ...");
-            }
-            // --upgrade 付きで実行し、未インストール時はインストール、インストール済み時は最新に更新
-            await InstallPackageWithPipAsync("openai");
-            _logMessage("openaiパッケージの確認が完了したのだ。");
-        }
-        catch (Exception ex)
-        {
-            _logError($"openai確認処理でエラーなのだ: {ex.Message}");
         }
     }
 
