@@ -531,7 +531,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
                         suffix++;
                     }
                     System.IO.Directory.CreateDirectory(userDir);
-                    outputPath = System.IO.Path.Combine(userDir, $"{username}.json");
+                    outputPath = userDir;
                     LogMessage($"X.com ユーザーフォルダを作成したのだ: {userDir}");
                 }
                 else if (host is "instagram.com" or "www.instagram.com" or "m.instagram.com"

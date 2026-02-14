@@ -99,7 +99,8 @@ public sealed class WebScraperService : IDisposable
             }
 
             var username = ExtractXTwitterUsername(url);
-            var outputDir = Path.GetDirectoryName(outputPath);
+            // outputPath はX/Twitterの場合ディレクトリパスそのものが渡される
+            var outputDir = Directory.Exists(outputPath) ? outputPath : Path.GetDirectoryName(outputPath);
             if (outputDir is null)
             {
                 _logError($"出力ディレクトリの取得に失敗したのだ: {outputPath}");

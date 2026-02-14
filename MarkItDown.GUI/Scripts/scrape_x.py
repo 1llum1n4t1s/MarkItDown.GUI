@@ -17,7 +17,6 @@ Usage:
     3: セッション切れ（再ログインが必要）
 """
 
-import json
 import os
 import random
 import re
@@ -874,53 +873,6 @@ def _update_tweet_image_info(tweets: list[dict], tweet_id: str, idx: int, orig_u
             break
 
 
-def save_json(tweets: list[dict], username: str, output_dir: str) -> str:
-    """最終JSONを出力する"""
-    output_path = os.path.join(output_dir, f"{username}.json")
-
-    # 画像カウント
-    image_count = 0
-    for tweet in tweets:
-        details = tweet.get("image_details", [])
-        image_count += sum(1 for d in details if d.get("downloaded", False))
-
-    # JSON出力データ構築
-    output_data = {
-        "username": username,
-        "url": f"https://x.com/{username}",
-        "scraped_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "tweet_count": len(tweets),
-        "image_count": image_count,
-        "tweets": []
-    }
-
-    for tweet in sorted(tweets, key=lambda t: t.get("tweet_id", ""), reverse=True):
-        tweet_entry = {
-            "tweet_id": tweet.get("tweet_id", ""),
-            "text": tweet.get("text", ""),
-            "timestamp": tweet.get("timestamp"),
-            "is_retweet": tweet.get("is_retweet", False),
-            "is_reply": tweet.get("is_reply", False),
-            "images": [],
-            "metrics": tweet.get("metrics", {})
-        }
-
-        # 画像詳細をimages配列に変換
-        for detail in tweet.get("image_details", []):
-            tweet_entry["images"].append({
-                "url": detail.get("url", ""),
-                "filename": detail.get("filename", ""),
-                "downloaded": detail.get("downloaded", False)
-            })
-
-        output_data["tweets"].append(tweet_entry)
-
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(output_data, f, ensure_ascii=False, indent=2)
-
-    log(f"JSON出力完了: {output_path}")
-    return output_path
-
 
 def main():
     if len(sys.argv) < 3:
@@ -962,15 +914,9 @@ def main():
 
             if len(tweets) == 0:
                 log("ツイートが見つからなかったのだ。ユーザー名を確認してください。")
-                # 空のJSONを出力
-                save_json(tweets, username, user_output_dir)
                 context.close()
                 context = None
                 return
-
-            # 中間JSON保存
-            save_json(tweets, username, user_output_dir)
-            log("中間JSONを保存したのだ")
 
             # ブラウザを閉じる（画像DLにはブラウザ不要）
             context.close()
@@ -981,9 +927,13 @@ def main():
             log("=== Phase 2: 画像ダウンロード ===")
             download_images(tweets, user_output_dir)
 
-            # 最終JSON保存（画像DL結果を反映）
-            final_path = save_json(tweets, username, user_output_dir)
-            log(f"=== 完了! ツイート: {len(tweets)} 件, 出力: {final_path} ===")
+            # DL成功画像数をカウント
+            image_count = 0
+            for tweet in tweets:
+                details = tweet.get("image_details", [])
+                image_count += sum(1 for d in details if d.get("downloaded", False))
+
+            log(f"=== 完了! ツイート: {len(tweets)} 件, 画像: {image_count} 枚 ===")
 
     except SystemExit:
         raise
