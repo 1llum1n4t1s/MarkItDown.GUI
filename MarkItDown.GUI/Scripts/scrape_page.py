@@ -34,6 +34,10 @@ def log(msg: str):
     print(msg, flush=True)
 
 
+def log_error(msg: str):
+    print(msg, file=sys.stderr, flush=True)
+
+
 def install_playwright_browsers():
     """Playwright のブラウザバイナリをインストールする (chromium のみ)"""
     log("Playwright ブラウザをインストール中...")
@@ -56,7 +60,8 @@ def check_playwright_browsers() -> bool:
             browser = p.chromium.launch(headless=True)
             browser.close()
         return True
-    except Exception:
+    except (OSError, RuntimeError, Exception) as e:
+        log_error(f"Playwright ブラウザ確認エラー: {e}")
         return False
 
 
@@ -115,8 +120,8 @@ def get_page_summary(page, url: str) -> dict:
             };
         }""")
         summary["dom_stats"] = dom_stats
-    except Exception as e:
-        log(f"DOM統計取得エラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"DOM統計取得エラー: {e}")
 
     # HTMLサンプル（script/style除去、先頭4000文字）
     try:
@@ -127,8 +132,8 @@ def get_page_summary(page, url: str) -> dict:
             return html.substring(0, 4000);
         }""")
         summary["sample_html"] = sample_html
-    except Exception as e:
-        log(f"HTMLサンプル取得エラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"HTMLサンプル取得エラー: {e}")
 
     # 可視テキストのサンプル（先頭500文字）
     try:
@@ -136,8 +141,8 @@ def get_page_summary(page, url: str) -> dict:
             return document.body.innerText?.substring(0, 500) || '';
         }""")
         summary["visible_text_sample"] = visible_text
-    except Exception:
-        pass
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"可視テキスト取得エラー: {e}")
 
     return summary
 
@@ -161,10 +166,10 @@ def claude_call(prompt, stdin_text=""):
             log(f"Claude CLI エラー (exit {result.returncode}): {result.stderr[:200]}")
             return None
     except subprocess.TimeoutExpired:
-        log("Claude CLI がタイムアウトしました")
+        log_error("Claude CLI がタイムアウトしました")
         return None
-    except Exception as e:
-        log(f"Claude CLI 呼び出しエラー: {e}")
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
+        log_error(f"Claude CLI 呼び出しエラー: {e}")
         return None
 
 
@@ -404,8 +409,8 @@ def extract_metadata(page, data: dict):
             content = m.get_attribute("content") or ""
             if name and content:
                 data["metadata"][name] = content
-    except Exception:
-        pass
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"メタデータ抽出エラー: {e}")
 
 
 def extract_json_ld(page, data: dict):
@@ -418,14 +423,14 @@ def extract_json_ld(page, data: dict):
                 ld_text = ld_el.inner_text()
                 if ld_text:
                     ld_list.append(json.loads(ld_text))
-            except Exception:
-                pass
+            except (json.JSONDecodeError, RuntimeError, TimeoutError) as e:
+                log_error(f"JSON-LD 解析エラー: {e}")
         if len(ld_list) == 1:
             data["structured_data"] = ld_list[0]
         elif len(ld_list) > 1:
             data["structured_data"] = ld_list
-    except Exception:
-        pass
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"JSON-LD 抽出エラー: {e}")
 
 
 def extract_list_items(page, items_selector: str, fields: list, ignore: list, data: dict):
@@ -457,7 +462,7 @@ def extract_list_items(page, items_selector: str, fields: list, ignore: list, da
                             value = (el.inner_text() or "").strip()
                         if value:
                             item_data[name] = value
-                except Exception:
+                except (RuntimeError, TimeoutError):
                     continue
 
             # フィールドが取得できなかった場合、アイテム全体のテキストを取得
@@ -466,14 +471,14 @@ def extract_list_items(page, items_selector: str, fields: list, ignore: list, da
                     text = (item.inner_text() or "").strip()
                     if text and len(text) >= 3:
                         item_data["text"] = text
-                except Exception:
+                except (RuntimeError, TimeoutError):
                     continue
 
             if item_data:
                 data["content"].append(item_data)
 
-    except Exception as e:
-        log(f"リストアイテム抽出エラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"リストアイテム抽出エラー: {e}")
 
 
 def extract_from_container(page, container_selector: str, fields: list, ignore: list, data: dict):
@@ -504,7 +509,7 @@ def extract_from_container(page, container_selector: str, fields: list, ignore: 
                         value = (el.inner_text() or "").strip()
                     if value:
                         content_item[name] = value
-            except Exception:
+            except (RuntimeError, TimeoutError):
                 continue
 
         if content_item:
@@ -515,11 +520,11 @@ def extract_from_container(page, container_selector: str, fields: list, ignore: 
                 text = (container.inner_text() or "").strip()
                 if text:
                     data["content"].append({"text": text})
-            except Exception:
+            except (RuntimeError, TimeoutError):
                 pass
 
-    except Exception as e:
-        log(f"コンテナ抽出エラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"コンテナ抽出エラー: {e}")
 
 
 def extract_fields_global(page, fields: list, ignore: list, data: dict):
@@ -550,7 +555,7 @@ def extract_fields_global(page, fields: list, ignore: list, data: dict):
                 content_item[name] = values[0]
             elif len(values) > 1:
                 content_item[name] = values
-        except Exception:
+        except (RuntimeError, TimeoutError):
             continue
 
     if content_item:
@@ -566,7 +571,7 @@ def should_ignore(element, ignore_selectors: list) -> bool:
             )
             if parent:
                 return True
-        except Exception:
+        except (RuntimeError, TimeoutError):
             continue
     return False
 
@@ -592,8 +597,8 @@ def extract_images(page, url: str, ignore: list, data: dict):
             return imgs;
         }}""", {"baseUrl": url, "ignoreSelector": ignore_css})
         data["images"] = images or []
-    except Exception:
-        pass
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"画像抽出エラー: {e}")
 
 
 def extract_links(page, url: str, ignore: list, data: dict):
@@ -619,8 +624,8 @@ def extract_links(page, url: str, ignore: list, data: dict):
             return result;
         }}""", {"baseUrl": url, "ignoreSelector": ignore_css})
         data["links"] = links or []
-    except Exception:
-        pass
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"リンク抽出エラー: {e}")
 
 
 # ────────────────────────────────────────────
@@ -645,8 +650,8 @@ def find_next_page_with_strategy(page, current_url: str, strategy: dict) -> str 
                 abs_url = urljoin(current_url, href)
                 if urlparse(abs_url).netloc == parsed_current.netloc:
                     return abs_url
-    except Exception as e:
-        log(f"戦略ページネーション検出エラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"戦略ページネーション検出エラー: {e}")
 
     return None
 
@@ -691,7 +696,7 @@ def _try_click(el, page, wait_ms: int) -> bool:
         el.click(timeout=3000)
         page.wait_for_timeout(wait_ms)
         return True
-    except Exception as click_err:
+    except (RuntimeError, TimeoutError) as click_err:
         err_msg = str(click_err)
         if "intercepts pointer events" in err_msg or "Timeout" in err_msg:
             # オーバーレイに遮られているため、まず除去を試みてからリトライ
@@ -700,14 +705,14 @@ def _try_click(el, page, wait_ms: int) -> bool:
                 el.click(timeout=3000)
                 page.wait_for_timeout(wait_ms)
                 return True
-            except Exception:
+            except (RuntimeError, TimeoutError):
                 # それでも失敗する場合は force クリック
                 try:
                     el.click(force=True, timeout=3000)
                     page.wait_for_timeout(wait_ms)
                     return True
-                except Exception as force_err:
-                    log(f"force クリックも失敗: {force_err}")
+                except (RuntimeError, TimeoutError) as force_err:
+                    log_error(f"force クリックも失敗: {force_err}")
                     return False
         raise
 
@@ -740,8 +745,8 @@ def _dismiss_overlays(page):
             }
         }""")
         log("オーバーレイを除去しました")
-    except Exception as e:
-        log(f"オーバーレイ除去中にエラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"オーバーレイ除去中にエラー: {e}")
 
 
 def click_load_more_buttons(page, max_clicks: int = 10, wait_ms: int = 2000):
@@ -770,13 +775,13 @@ def click_load_more_buttons(page, max_clicks: int = 10, wait_ms: int = 2000):
                                     clicked = True
                                     log(f"ボタンクリック: '{text}' (#{total_clicks})")
                                     break
-                    except Exception as e:
-                        log(f"ボタンクリック処理中にエラー: {e}")
+                    except (RuntimeError, TimeoutError) as e:
+                        log_error(f"ボタンクリック処理中にエラー: {e}")
                         continue
                 if clicked:
                     break
-            except Exception as e:
-                log(f"ボタン検索中にエラー: {e}")
+            except (RuntimeError, TimeoutError) as e:
+                log_error(f"ボタン検索中にエラー: {e}")
                 continue
 
         # 2. CSSセレクタによるボタン検索
@@ -793,11 +798,11 @@ def click_load_more_buttons(page, max_clicks: int = 10, wait_ms: int = 2000):
                                     text = (el.inner_text() or "").strip()[:30]
                                     log(f"セレクタクリック: '{text}' ({selector}) (#{total_clicks})")
                                     break
-                        except Exception as e:
-                            log(f"セレクタクリック処理中にエラー: {e}")
+                        except (RuntimeError, TimeoutError) as e:
+                            log_error(f"セレクタクリック処理中にエラー: {e}")
                             continue
-                except Exception as e:
-                    log(f"セレクタ検索中にエラー ({selector}): {e}")
+                except (RuntimeError, TimeoutError) as e:
+                    log_error(f"セレクタ検索中にエラー ({selector}): {e}")
                     continue
 
         # 3. 無限スクロール
@@ -839,11 +844,11 @@ def dismiss_cookie_banners(page):
                         page.wait_for_timeout(500)
                         log(f"Cookie バナーを閉じました: '{text}'")
                         return
-                except Exception as e:
-                    log(f"Cookie バナー要素処理中にエラー: {e}")
+                except (RuntimeError, TimeoutError) as e:
+                    log_error(f"Cookie バナー要素処理中にエラー: {e}")
                     continue
-    except Exception as e:
-        log(f"Cookie バナー処理中にエラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"Cookie バナー処理中にエラー: {e}")
 
 
 # ────────────────────────────────────────────
@@ -922,8 +927,8 @@ def main():
                 log(f"アクセス中: {current_url}")
                 try:
                     page.goto(current_url, wait_until="domcontentloaded", timeout=60000)
-                except Exception as nav_error:
-                    log(f"ナビゲーション警告: {nav_error}")
+                except (RuntimeError, TimeoutError) as nav_error:
+                    log_error(f"ナビゲーション警告: {nav_error}")
                     log("ページの読み込みを続行します...")
                 log(f"読み込み完了: {page.title()}")
 
@@ -986,8 +991,8 @@ def main():
                         page_summary = get_page_summary(page, current_url)
                         try:
                             strategy = generate_scraping_strategy(page_summary)
-                        except Exception as strat_err:
-                            log(f"戦略再生成に失敗、前回の戦略を継続します: {strat_err}")
+                        except (ValueError, RuntimeError) as strat_err:
+                            log_error(f"戦略再生成に失敗、前回の戦略を継続します: {strat_err}")
 
                 # ページネーション
                 next_url = find_next_page_with_strategy(page, current_url, strategy)
@@ -1024,8 +1029,8 @@ def main():
             log(f"JSONファイルを出力しました: {output_path}")
 
         except Exception as e:
-            log(f"スクレイピングエラー: {e}")
-            log(traceback.format_exc())
+            log_error(f"スクレイピングエラー: {type(e).__name__}: {e}")
+            log_error(traceback.format_exc())
             sys.exit(1)
         finally:
             context.close()

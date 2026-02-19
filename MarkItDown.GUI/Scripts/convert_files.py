@@ -4,6 +4,7 @@ import json
 import traceback
 import subprocess
 from datetime import datetime
+from pathlib import Path
 import asyncio
 
 # グローバル定数（毎回の再生成を回避）
@@ -23,6 +24,9 @@ IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.
 def log_message(message):
     print(message, flush=True)
 
+def log_error(message):
+    print(message, file=sys.stderr, flush=True)
+
 def _write_output_file(content, base_name, suffix, timestamp, directory):
     """ヘルパー関数: ファイルにコンテンツを書き込む。書き込んだファイル名を返す。"""
     if not content or not content.strip():
@@ -30,7 +34,7 @@ def _write_output_file(content, base_name, suffix, timestamp, directory):
         return None
 
     filename = f'{base_name}_{suffix}_{timestamp}.md'
-    output_path = os.path.join(directory, filename)
+    output_path = Path(directory) / filename
 
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(content)
@@ -53,12 +57,15 @@ def claude_call(prompt, stdin_text=""):
         )
         if result.returncode == 0:
             return result.stdout.strip()
-        log_message(f"Claude CLI returned non-zero exit code: {result.returncode}")
+        log_error(f"Claude CLI returned non-zero exit code: {result.returncode}")
         if result.stderr:
-            log_message(f"Claude CLI stderr: {result.stderr[:500]}")
+            log_error(f"Claude CLI stderr: {result.stderr[:500]}")
         return None
-    except Exception as e:
-        log_message(f"Claude CLI error: {e}")
+    except subprocess.TimeoutExpired:
+        log_error("Claude CLI error: process timed out after 300 seconds")
+        return None
+    except (subprocess.SubprocessError, OSError) as e:
+        log_error(f"Claude CLI error: {e}")
         return None
 
 LLM_PROMPT = "この画像について詳しく説明してください。画像の内容、オブジェクト、色、雰囲気などを含めて説明してください。日本語で回答してください。"
@@ -108,8 +115,8 @@ def summarize_markdown_with_llm(raw_markdown, file_name):
             log_message('LLMまとめの結果が空でした。')
             return None
 
-    except Exception as e:
-        log_message(f'LLMまとめエラー: {e}')
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
+        log_error(f'LLMまとめエラー: {e}')
         return None
 
 
@@ -148,15 +155,15 @@ def refine_markdown_with_llm(raw_markdown, file_name):
             log_message('LLM整形の結果が空でした。元のテキストを使用します。')
             return raw_markdown
 
-    except Exception as e:
-        log_message(f'LLM整形エラー: {e}。元のテキストを使用します。')
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
+        log_error(f'LLM整形エラー: {e}。元のテキストを使用します。')
         return raw_markdown
 
 try:
     log_message('Pythonスクリプト開始')
 
     # Get application directory
-    app_dir = os.path.dirname(os.path.abspath(__file__))
+    app_dir = str(Path(__file__).resolve().parent)
     log_message('Application directory: ' + app_dir)
 
     # Claude CLI設定を環境変数から取得
@@ -171,10 +178,11 @@ try:
     async def process_file_async(md, file_path):
         """ファイルをMarkItDownで変換する。PDF等の構造化ドキュメントはClaude CLIで整形する。"""
         try:
-            file_name = os.path.basename(file_path)
-            file_dir = os.path.dirname(file_path)
-            name_without_ext = os.path.splitext(file_name)[0]
-            file_ext = os.path.splitext(file_path)[1].lower()
+            p = Path(file_path)
+            file_name = p.name
+            file_dir = str(p.parent)
+            name_without_ext = p.stem
+            file_ext = p.suffix.lower()
 
             log_message(f'ファイル処理開始: {file_path}')
             log_message(f'ファイル名: {file_name}')
@@ -186,8 +194,8 @@ try:
                 markdown_content = result.text_content
                 log_message(f'変換完了、コンテンツ長: {len(markdown_content)}文字')
             except Exception as convert_error:
-                log_message(f'ファイル変換エラー: {file_path} - {str(convert_error)}')
-                traceback.print_exc()
+                log_error(f'ファイル変換エラー: {file_path} - {str(convert_error)}')
+                traceback.print_exc(file=sys.stderr)
                 raise
 
             # 変換結果が空の場合、ファイル情報を追加
@@ -195,7 +203,7 @@ try:
                 log_message(f'警告: 変換結果が空です。ファイル情報を追加します。')
 
                 if file_ext in IMAGE_EXTENSIONS:
-                    file_size = os.path.getsize(file_path)
+                    file_size = p.stat().st_size
                     markdown_content = f"# {file_name}\n\n"
                     markdown_content += f"画像ファイル: `{file_name}`\n\n"
                     markdown_content += f"- ファイルパス: `{file_path}`\n"
@@ -247,10 +255,10 @@ try:
             # サポートされていないファイル形式の場合
             if 'UnsupportedFormatException' in error_type or 'not supported' in error_msg.lower():
                 log_message(f'サポートされていないファイル形式: {file_path}')
-                file_ext = os.path.splitext(file_path)[1].lower()
+                file_ext = Path(file_path).suffix.lower()
                 log_message(f'このファイル形式は MarkItDown でサポートされていません: {file_ext}')
 
-                file_size = os.path.getsize(file_path)
+                file_size = Path(file_path).stat().st_size
                 markdown_content = f"# {file_name}\n\n"
                 markdown_content += f"**サポートされていないファイル形式**\n\n"
                 markdown_content += f"- ファイルパス: `{file_path}`\n"
@@ -266,15 +274,15 @@ try:
 
                 timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
                 output_filename = f'{name_without_ext}_{timestamp}.md'
-                output_path = os.path.join(file_dir, output_filename)
+                output_path = Path(file_dir) / output_filename
 
                 with open(output_path, 'w', encoding='utf-8') as f:
                     f.write(markdown_content)
 
                 return f'サポート外: {file_name}'
             else:
-                log_message(f'変換エラー: {file_path} - {str(e)}')
-                traceback.print_exc()
+                log_error(f'変換エラー: {file_path} - {str(e)}')
+                traceback.print_exc(file=sys.stderr)
                 return f'変換エラー: {file_path} - {str(e)}'
 
     async def convert_files_async(file_paths, folder_paths):
@@ -293,7 +301,7 @@ try:
             try:
                 md = create_markitdown_instance()
             except Exception as e:
-                log_message(f'MarkItDownインスタンス作成エラー: {e}')
+                log_error(f'MarkItDownインスタンス作成エラー: {e}')
                 raise
 
             # Process files with concurrency control (max 3 concurrent tasks)
@@ -305,7 +313,7 @@ try:
                     batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
                     for result in batch_results:
                         if isinstance(result, Exception):
-                            log_message(f'バッチ処理エラー: {result}')
+                            log_error(f'バッチ処理エラー: {result}')
                             results.append(f'処理エラー: {str(result)}')
                         else:
                             results.append(result)
@@ -313,17 +321,17 @@ try:
             # フォルダの処理（process_file_asyncを再利用）
             for folder_path in folder_paths:
                 log_message(f'フォルダ処理開始: {folder_path}')
-                if os.path.exists(folder_path):
+                if Path(folder_path).exists():
                     try:
-                        folder_name = os.path.basename(folder_path)
+                        folder_name = Path(folder_path).name
 
                         # フォルダ内のサポート対象ファイルを収集
                         folder_file_paths = []
                         for root, dirs, files in os.walk(folder_path, followlinks=False):
                             for file in files:
-                                file_ext = os.path.splitext(file)[1].lower()
+                                file_ext = Path(file).suffix.lower()
                                 if file_ext in SUPPORTED_EXTENSIONS:
-                                    folder_file_paths.append(os.path.join(root, file))
+                                    folder_file_paths.append(str(Path(root) / file))
                                 else:
                                     log_message(f'サポートされていないファイル形式: {file}')
 
@@ -337,7 +345,7 @@ try:
                             batch_results = await asyncio.gather(*batch_tasks, return_exceptions=True)
                             for r in batch_results:
                                 if isinstance(r, Exception):
-                                    log_message(f'フォルダ内ファイル処理エラー: {r}')
+                                    log_error(f'フォルダ内ファイル処理エラー: {r}')
                                 else:
                                     converted_count += 1
 
@@ -346,19 +354,19 @@ try:
                     except Exception as e:
                         results.append(f'フォルダ処理エラー: {folder_path} - {str(e)}')
                 else:
-                    log_message(f'フォルダが存在しません: {folder_path}')
+                    log_error(f'フォルダが存在しません: {folder_path}')
 
             return results
 
         except ImportError as e:
-            log_message(f'MarkItDownライブラリのインポートに失敗: {e}')
-            log_message('MarkItDownライブラリが取得できませんでした、アプリを終了します。')
+            log_error(f'MarkItDownライブラリのインポートに失敗: {e}')
+            log_error('MarkItDownライブラリが取得できませんでした、アプリを終了します。')
             results.append('MarkItDownライブラリが取得できませんでした、アプリを終了します。')
             return results
 
     # コマンドライン引数からJSONファイルパスを取得
     if len(sys.argv) < 3:
-        log_message('エラー: ファイルパスとフォルダパスのJSONファイルパスが必要です')
+        log_error('エラー: ファイルパスとフォルダパスのJSONファイルパスが必要です')
         sys.exit(1)
 
     file_paths_json_file = sys.argv[1]
@@ -382,20 +390,20 @@ try:
 
         # 型チェック
         if not isinstance(file_paths, list):
-            log_message(f'エラー: ファイルパスがリスト型ではありません: {type(file_paths)}')
+            log_error(f'エラー: ファイルパスがリスト型ではありません: {type(file_paths)}')
             sys.exit(1)
         if not isinstance(folder_paths, list):
-            log_message(f'エラー: フォルダパスがリスト型ではありません: {type(folder_paths)}')
+            log_error(f'エラー: フォルダパスがリスト型ではありません: {type(folder_paths)}')
             sys.exit(1)
 
         log_message('JSONデータのパースに成功しました')
     except FileNotFoundError as e:
-        log_message(f'JSONファイルが見つかりません: {e}')
+        log_error(f'JSONファイルが見つかりません: {e}')
         sys.exit(1)
     except json.JSONDecodeError as e:
-        log_message(f'JSONデコードエラー: {e}')
-        log_message(f'ファイルパスJSON長: {len(file_paths_json)}')
-        log_message(f'フォルダパスJSON長: {len(folder_paths_json)}')
+        log_error(f'JSONデコードエラー: {e}')
+        log_error(f'ファイルパスJSON長: {len(file_paths_json)}')
+        log_error(f'フォルダパスJSON長: {len(folder_paths_json)}')
         sys.exit(1)
 
     log_message(f'処理対象ファイル数: {len(file_paths)}')
@@ -411,6 +419,6 @@ try:
     log_message('Pythonスクリプト完了')
     
 except Exception as e:
-    log_message('Pythonスクリプト実行中にエラー: ' + str(e))
-    log_message('スタックトレース: ' + traceback.format_exc())
-    sys.exit(1) 
+    log_error('Pythonスクリプト実行中にエラー: ' + str(e))
+    log_error('スタックトレース: ' + traceback.format_exc())
+    sys.exit(1)

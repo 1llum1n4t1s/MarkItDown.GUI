@@ -84,6 +84,11 @@ public static class ProcessUtils
                 return false;
             }
 
+            // stdout/stderr をリダイレクトしている場合、読み取らないとバッファが詰まりデッドロックになる
+            // BeginOutputReadLine/BeginErrorReadLine でバッファを非同期に消費する
+            process.BeginOutputReadLine();
+            process.BeginErrorReadLine();
+
             using var cts = new CancellationTokenSource(timeoutMs);
             try
             {
@@ -164,12 +169,14 @@ public static class ProcessUtils
             catch { /* タイムアウトは無視 */ }
 
             string output;
+            string error;
             lock (outputSb) { output = outputSb.ToString(); }
+            lock (errorSb) { error = errorSb.ToString(); }
 
             if (ct.IsCancellationRequested)
-                return (-1, output, "プロセスがキャンセルされました");
+                return (-1, output, string.IsNullOrEmpty(error) ? "プロセスがキャンセルされました" : error);
 
-            return (-1, output, "プロセスがタイムアウトしました");
+            return (-1, output, string.IsNullOrEmpty(error) ? "プロセスがタイムアウトしました" : error);
         }
 
         return (process.ExitCode, outputSb.ToString(), errorSb.ToString());

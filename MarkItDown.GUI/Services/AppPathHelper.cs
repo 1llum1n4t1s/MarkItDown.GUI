@@ -72,8 +72,9 @@ public static class AppPathHelper
         if (IsVelopackEnvironment)
         {
             // current の親 = %LOCALAPPDATA%\MarkItDown.GUI\
-            var parentDir = Path.GetDirectoryName(
-                AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/'))!;
+            var trimmed = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+            var parentDir = Path.GetDirectoryName(trimmed)
+                ?? AppDomain.CurrentDomain.BaseDirectory;
             return Path.Combine(parentDir, "lib");
         }
 
@@ -85,9 +86,9 @@ public static class AppPathHelper
     {
         if (IsVelopackEnvironment)
         {
-            var parentDir = Path.GetDirectoryName(
-                AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/'))!;
-            return parentDir;
+            var trimmed = AppDomain.CurrentDomain.BaseDirectory.TrimEnd('\\', '/');
+            return Path.GetDirectoryName(trimmed)
+                ?? AppDomain.CurrentDomain.BaseDirectory;
         }
 
         return AppDomain.CurrentDomain.BaseDirectory;

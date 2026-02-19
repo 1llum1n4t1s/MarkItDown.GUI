@@ -32,6 +32,10 @@ def log(msg: str):
     print(msg, flush=True)
 
 
+def log_error(msg: str):
+    print(msg, file=sys.stderr, flush=True)
+
+
 # ────────────────────────────────────────────
 #  HTTP でページ取得
 # ────────────────────────────────────────────
@@ -79,10 +83,10 @@ def claude_call(prompt, stdin_text=""):
             log(f"Claude CLI エラー (exit {result.returncode}): {result.stderr[:200]}")
             return None
     except subprocess.TimeoutExpired:
-        log("Claude CLI がタイムアウトしました")
+        log_error("Claude CLI がタイムアウトしました")
         return None
-    except Exception as e:
-        log(f"Claude CLI 呼び出しエラー: {e}")
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
+        log_error(f"Claude CLI 呼び出しエラー: {e}")
         return None
 
 
@@ -135,8 +139,8 @@ def get_page_summary(soup: BeautifulSoup, url: str) -> dict:
             "common_classes": top_classes,
             "ids": ids,
         }
-    except Exception as e:
-        log(f"DOM統計取得エラー: {e}")
+    except (AttributeError, TypeError, ValueError) as e:
+        log_error(f"DOM統計取得エラー: {e}")
 
     # HTMLサンプル（script/style除去、先頭4000文字）
     try:
@@ -145,8 +149,8 @@ def get_page_summary(soup: BeautifulSoup, url: str) -> dict:
             tag.decompose()
         html_str = str(clone)
         summary["sample_html"] = html_str[:4000]
-    except Exception as e:
-        log(f"HTMLサンプル取得エラー: {e}")
+    except (AttributeError, TypeError, ValueError) as e:
+        log_error(f"HTMLサンプル取得エラー: {e}")
 
     # 可視テキストのサンプル（先頭500文字）
     try:
@@ -154,8 +158,8 @@ def get_page_summary(soup: BeautifulSoup, url: str) -> dict:
         if body:
             text = body.get_text(separator="\n", strip=True)
             summary["visible_text_sample"] = text[:500]
-    except Exception:
-        pass
+    except (AttributeError, TypeError) as e:
+        log_error(f"可視テキスト取得エラー: {e}")
 
     return summary
 
@@ -333,16 +337,16 @@ def should_ignore(element: Tag, ignore_selectors: list) -> bool:
                     try:
                         if parent.select_one(selector) is parent or parent.name == selector:
                             return True
-                    except Exception:
+                    except (NotImplementedError, ValueError, AttributeError):
                         pass
                     # セレクタに直接マッチするかチェック
                     try:
                         matches = parent.parent.select(selector) if parent.parent else []
                         if parent in matches:
                             return True
-                    except Exception:
+                    except (NotImplementedError, ValueError, AttributeError):
                         pass
-        except Exception:
+        except (AttributeError, TypeError):
             continue
     return False
 
@@ -355,8 +359,8 @@ def extract_metadata(soup: BeautifulSoup, data: dict):
             content = m.get("content", "")
             if name and content:
                 data["metadata"][name] = content
-    except Exception:
-        pass
+    except (AttributeError, TypeError) as e:
+        log_error(f"メタデータ抽出エラー: {e}")
 
 
 def extract_json_ld(soup: BeautifulSoup, data: dict):
@@ -369,14 +373,14 @@ def extract_json_ld(soup: BeautifulSoup, data: dict):
                 ld_text = ld_el.string
                 if ld_text:
                     ld_list.append(json.loads(ld_text))
-            except Exception:
-                pass
+            except (json.JSONDecodeError, AttributeError) as e:
+                log_error(f"JSON-LD 解析エラー: {e}")
         if len(ld_list) == 1:
             data["structured_data"] = ld_list[0]
         elif len(ld_list) > 1:
             data["structured_data"] = ld_list
-    except Exception:
-        pass
+    except (AttributeError, TypeError) as e:
+        log_error(f"JSON-LD 抽出エラー: {e}")
 
 
 def _get_element_value(el: Tag, attribute: str | None) -> str:
@@ -411,7 +415,7 @@ def extract_list_items(soup: BeautifulSoup, items_selector: str, fields: list, i
                         value = _get_element_value(el, attribute)
                         if value:
                             item_data[name] = value
-                except Exception:
+                except (AttributeError, TypeError, ValueError):
                     continue
 
             # フィールドが取得できなかった場合、アイテム全体のテキストを取得
@@ -420,14 +424,14 @@ def extract_list_items(soup: BeautifulSoup, items_selector: str, fields: list, i
                     text = item.get_text(strip=True)
                     if text and len(text) >= 3:
                         item_data["text"] = text
-                except Exception:
+                except (AttributeError, TypeError):
                     continue
 
             if item_data:
                 data["content"].append(item_data)
 
-    except Exception as e:
-        log(f"リストアイテム抽出エラー: {e}")
+    except (AttributeError, TypeError, ValueError) as e:
+        log_error(f"リストアイテム抽出エラー: {e}")
 
 
 def extract_from_container(soup: BeautifulSoup, container_selector: str, fields: list, ignore: list, data: dict):
@@ -454,7 +458,7 @@ def extract_from_container(soup: BeautifulSoup, container_selector: str, fields:
                     value = _get_element_value(el, attribute)
                     if value:
                         content_item[name] = value
-            except Exception:
+            except (AttributeError, TypeError, ValueError):
                 continue
 
         if content_item:
@@ -465,11 +469,11 @@ def extract_from_container(soup: BeautifulSoup, container_selector: str, fields:
                 text = container.get_text(strip=True)
                 if text:
                     data["content"].append({"text": text})
-            except Exception:
+            except (AttributeError, TypeError):
                 pass
 
-    except Exception as e:
-        log(f"コンテナ抽出エラー: {e}")
+    except (AttributeError, TypeError, ValueError) as e:
+        log_error(f"コンテナ抽出エラー: {e}")
 
 
 def extract_fields_global(soup: BeautifulSoup, fields: list, ignore: list, data: dict):
@@ -497,7 +501,7 @@ def extract_fields_global(soup: BeautifulSoup, fields: list, ignore: list, data:
                 content_item[name] = values[0]
             elif len(values) > 1:
                 content_item[name] = values
-        except Exception:
+        except (AttributeError, TypeError, ValueError):
             continue
 
     if content_item:
@@ -521,8 +525,8 @@ def extract_images(soup: BeautifulSoup, url: str, ignore: list, data: dict):
             seen.add(src)
             imgs.append({"src": src, "alt": img.get("alt", "")})
         data["images"] = imgs
-    except Exception:
-        pass
+    except (AttributeError, TypeError, ValueError) as e:
+        log_error(f"画像抽出エラー: {e}")
 
 
 def extract_links(soup: BeautifulSoup, url: str, ignore: list, data: dict):
@@ -545,8 +549,8 @@ def extract_links(soup: BeautifulSoup, url: str, ignore: list, data: dict):
             seen.add(href)
             links.append({"href": href, "text": text})
         data["links"] = links
-    except Exception:
-        pass
+    except (AttributeError, TypeError, ValueError) as e:
+        log_error(f"リンク抽出エラー: {e}")
 
 
 def extract_with_strategy(soup: BeautifulSoup, url: str, strategy: dict) -> dict:
@@ -623,8 +627,8 @@ def find_next_page_with_strategy(soup: BeautifulSoup, current_url: str, strategy
                 abs_url = urljoin(current_url, href)
                 if urlparse(abs_url).netloc == parsed_current.netloc:
                     return abs_url
-    except Exception as e:
-        log(f"戦略ページネーション検出エラー: {e}")
+    except (AttributeError, TypeError, ValueError) as e:
+        log_error(f"戦略ページネーション検出エラー: {e}")
 
     return None
 
@@ -687,8 +691,8 @@ def main():
 
             try:
                 html, final_url = fetch_html(current_url)
-            except Exception as e:
-                log(f"HTTP 取得エラー: {e}")
+            except (requests.RequestException, OSError) as e:
+                log_error(f"HTTP 取得エラー: {e}")
                 if page_num == 1:
                     raise
                 log("このページをスキップします")
@@ -754,8 +758,8 @@ def main():
         log(f"JSONファイルを出力しました: {output_path}")
 
     except Exception as e:
-        log(f"スクレイピングエラー: {e}")
-        log(traceback.format_exc())
+        log_error(f"スクレイピングエラー: {type(e).__name__}: {e}")
+        log_error(traceback.format_exc())
         sys.exit(1)
 
 

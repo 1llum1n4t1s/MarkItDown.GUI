@@ -39,7 +39,15 @@ public static class StartupRegistration
             key.SetValue(EntryName, value);
             Logger.Log($"スタートアップに登録しました: {value}", LogLevel.Debug);
         }
-        catch (Exception ex)
+        catch (UnauthorizedAccessException ex)
+        {
+            Logger.Log($"スタートアップ登録に失敗しました（アクセス拒否）: {ex.Message}", LogLevel.Warning);
+        }
+        catch (System.Security.SecurityException ex)
+        {
+            Logger.Log($"スタートアップ登録に失敗しました（セキュリティエラー）: {ex.Message}", LogLevel.Warning);
+        }
+        catch (IOException ex)
         {
             Logger.Log($"スタートアップ登録に失敗しました: {ex.Message}", LogLevel.Warning);
         }
@@ -61,7 +69,15 @@ public static class StartupRegistration
                 Logger.Log("スタートアップ登録を解除しました。", LogLevel.Debug);
             }
         }
-        catch (Exception ex)
+        catch (UnauthorizedAccessException ex)
+        {
+            Logger.Log($"スタートアップ登録解除に失敗しました（アクセス拒否）: {ex.Message}", LogLevel.Warning);
+        }
+        catch (System.Security.SecurityException ex)
+        {
+            Logger.Log($"スタートアップ登録解除に失敗しました（セキュリティエラー）: {ex.Message}", LogLevel.Warning);
+        }
+        catch (IOException ex)
         {
             Logger.Log($"スタートアップ登録解除に失敗しました: {ex.Message}", LogLevel.Warning);
         }

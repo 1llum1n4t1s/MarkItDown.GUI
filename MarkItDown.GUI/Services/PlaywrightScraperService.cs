@@ -50,7 +50,7 @@ public sealed class PlaywrightScraperService
         _statusCallback?.Invoke("依存パッケージを確認中...");
 
         // playwright パッケージチェック・更新
-        if (!await CheckPackageInstalledAsync("playwright", ct))
+        if (!await CheckPackageInstalledAsync("playwright", ct).ConfigureAwait(false))
         {
             _logMessage("playwright パッケージをインストール中なのだ...");
         }
@@ -58,7 +58,7 @@ public sealed class PlaywrightScraperService
         {
             _logMessage("playwright パッケージの最新バージョンを確認中なのだ...");
         }
-        await InstallPackageAsync("playwright", ct);
+        await InstallPackageAsync("playwright", ct).ConfigureAwait(false);
 
         _dependenciesInstalled = true;
     }
@@ -71,7 +71,7 @@ public sealed class PlaywrightScraperService
     /// <param name="ct">キャンセルトークン</param>
     public async Task ScrapeWithBrowserAsync(string url, string outputPath, CancellationToken ct = default)
     {
-        await EnsureDependenciesInstalledAsync(ct);
+        await EnsureDependenciesInstalledAsync(ct).ConfigureAwait(false);
 
         var appDir = Directory.GetCurrentDirectory();
         var scriptPath = Path.Combine(appDir, "Scripts", "scrape_page.py");
@@ -155,7 +155,7 @@ public sealed class PlaywrightScraperService
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, idleCts.Token);
-            await process.WaitForExitAsync(linkedCts.Token);
+            await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -270,7 +270,7 @@ public sealed class PlaywrightScraperService
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, idleCts.Token);
-            await process.WaitForExitAsync(linkedCts.Token);
+            await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -306,20 +306,20 @@ public sealed class PlaywrightScraperService
     /// <param name="ct">キャンセルトークン</param>
     public async Task ScrapeXTwitterAsync(string username, string outputDir, CancellationToken ct = default)
     {
-        await EnsureDependenciesInstalledAsync(ct);
+        await EnsureDependenciesInstalledAsync(ct).ConfigureAwait(false);
 
         // httpx パッケージの追加インストール（画像ダウンロード用）
-        if (!await CheckPackageInstalledAsync("httpx", ct))
+        if (!await CheckPackageInstalledAsync("httpx", ct).ConfigureAwait(false))
         {
             _logMessage("httpx パッケージをインストール中なのだ...");
-            await InstallPackageAsync("httpx", ct);
+            await InstallPackageAsync("httpx", ct).ConfigureAwait(false);
         }
 
         // browser-cookie3 パッケージの追加インストール（通常ChromeのCookie取り込み用）
-        if (!await CheckPackageInstalledAsync("browser_cookie3", ct))
+        if (!await CheckPackageInstalledAsync("browser_cookie3", ct).ConfigureAwait(false))
         {
             _logMessage("browser-cookie3 パッケージをインストール中なのだ...");
-            await InstallPackageAsync("browser-cookie3", ct);
+            await InstallPackageAsync("browser-cookie3", ct).ConfigureAwait(false);
         }
 
         var appDir = Directory.GetCurrentDirectory();
@@ -400,7 +400,7 @@ public sealed class PlaywrightScraperService
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, idleCts.Token);
-            await process.WaitForExitAsync(linkedCts.Token);
+            await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {
@@ -456,10 +456,10 @@ public sealed class PlaywrightScraperService
     /// <param name="ct">キャンセルトークン</param>
     public async Task ScrapeInstagramAsync(string username, string outputDir, CancellationToken ct = default)
     {
-        await EnsureDependenciesInstalledAsync(ct);
+        await EnsureDependenciesInstalledAsync(ct).ConfigureAwait(false);
 
         // openai パッケージの追加インストール
-        if (!await CheckPackageInstalledAsync("openai", ct))
+        if (!await CheckPackageInstalledAsync("openai", ct).ConfigureAwait(false))
         {
             _logMessage("openai パッケージをインストール中なのだ...");
         }
@@ -467,10 +467,10 @@ public sealed class PlaywrightScraperService
         {
             _logMessage("openai パッケージの最新バージョンを確認中なのだ...");
         }
-        await InstallPackageAsync("openai", ct);
+        await InstallPackageAsync("openai", ct).ConfigureAwait(false);
 
         // instaloader パッケージの追加インストール
-        if (!await CheckPackageInstalledAsync("instaloader", ct))
+        if (!await CheckPackageInstalledAsync("instaloader", ct).ConfigureAwait(false))
         {
             _logMessage("instaloader パッケージをインストール中なのだ...");
         }
@@ -478,7 +478,7 @@ public sealed class PlaywrightScraperService
         {
             _logMessage("instaloader パッケージの最新バージョンを確認中なのだ...");
         }
-        await InstallPackageAsync("instaloader", ct);
+        await InstallPackageAsync("instaloader", ct).ConfigureAwait(false);
 
         var appDir = Directory.GetCurrentDirectory();
         var scriptPath = Path.Combine(appDir, "Scripts", "scrape_instagram.py");
@@ -555,7 +555,7 @@ public sealed class PlaywrightScraperService
         try
         {
             using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, idleCts.Token);
-            await process.WaitForExitAsync(linkedCts.Token);
+            await process.WaitForExitAsync(linkedCts.Token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
         {

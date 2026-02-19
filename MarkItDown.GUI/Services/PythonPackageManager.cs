@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace MarkItDown.GUI.Services;
@@ -34,15 +35,27 @@ public class PythonPackageManager
     /// <summary>
     /// MarkItDown 関連パッケージを自動インストール/更新する
     /// </summary>
-    public async Task InstallMarkItDownPackageAsync()
+    public async Task InstallMarkItDownPackageAsync(CancellationToken ct = default)
     {
         try
         {
-            await CheckAndUnifyMarkItDownInstallationAsync();
+            await CheckAndUnifyMarkItDownInstallationAsync(ct);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logError($"パッケージインストールでエラーなのだ: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            _logError($"パッケージインストールでI/Oエラーなのだ: {ex.Message}");
         }
         catch (Exception ex)
         {
-            _logError($"パッケージインストールでエラーなのだ: {ex.Message}");
+            _logError($"パッケージインストールで予期しないエラーなのだ: {ex.Message}");
         }
     }
 
@@ -50,8 +63,9 @@ public class PythonPackageManager
     /// パッケージがインストールされているかチェックする
     /// </summary>
     /// <param name="packageName">パッケージ名</param>
+    /// <param name="ct">キャンセルトークン</param>
     /// <returns>インストールされているかどうか</returns>
-    private async Task<bool> CheckPackageInstalledAsync(string packageName)
+    private async Task<bool> CheckPackageInstalledAsync(string packageName, CancellationToken ct = default)
     {
         try
         {
@@ -77,8 +91,22 @@ public class PythonPackageManager
             startInfo.ArgumentList.Add($"import {importName}");
 
             var (exitCode, _, _) = await ProcessUtils.RunAsync(
-                startInfo, TimeoutSettings.PythonVersionCheckTimeoutMs);
+                startInfo, TimeoutSettings.PythonVersionCheckTimeoutMs, ct);
             return exitCode == 0;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to check {packageName} installation: {ex.Message}");
+            return false;
+        }
+        catch (IOException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to check {packageName} installation: {ex.Message}");
+            return false;
         }
         catch (Exception ex)
         {
@@ -91,7 +119,8 @@ public class PythonPackageManager
     /// pip でパッケージをインストール/更新する（非同期・デッドロック回避）
     /// </summary>
     /// <param name="packageName">パッケージ名</param>
-    private async Task InstallPackageWithPipAsync(string packageName)
+    /// <param name="ct">キャンセルトークン</param>
+    private async Task InstallPackageWithPipAsync(string packageName, CancellationToken ct = default)
     {
         try
         {
@@ -121,7 +150,7 @@ public class PythonPackageManager
             startInfo.ArgumentList.Add(packageName);
 
             var (exitCode, output, error) = await ProcessUtils.RunAsync(
-                startInfo, TimeoutSettings.PackageInstallTimeoutMs);
+                startInfo, TimeoutSettings.PackageInstallTimeoutMs, ct);
 
             if (!string.IsNullOrEmpty(output))
                 _logMessage($"pip出力: {output.TrimEnd()}");
@@ -133,20 +162,32 @@ public class PythonPackageManager
             else
                 _logError($"{packageName}のインストール/更新に失敗したのだ");
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
         {
             _logError($"{packageName}インストールでエラーなのだ: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            _logError($"{packageName}インストールでI/Oエラーなのだ: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logError($"{packageName}インストールで予期しないエラーなのだ: {ex.Message}");
         }
     }
 
     /// <summary>
     /// markitdown パッケージの状態をチェックし、最新バージョンにインストール/更新する
     /// </summary>
-    private async Task CheckAndUnifyMarkItDownInstallationAsync()
+    private async Task CheckAndUnifyMarkItDownInstallationAsync(CancellationToken ct)
     {
         try
         {
-            var currentVersion = await GetPackageVersionAsync("markitdown");
+            var currentVersion = await GetPackageVersionAsync("markitdown", ct);
             if (currentVersion is null)
             {
                 _logMessage("markitdownパッケージが不足しているのでpipでインストールするのだ");
@@ -156,10 +197,10 @@ public class PythonPackageManager
                 _logMessage($"markitdown {currentVersion} がインストール済みなのだ。最新バージョンを確認中なのだ...");
             }
 
-            await InstallMarkItDownWithPipAsync();
+            await InstallMarkItDownWithPipAsync(ct);
 
             // インストール後のバージョン確認
-            var installedVersion = await GetPackageVersionAsync("markitdown");
+            var installedVersion = await GetPackageVersionAsync("markitdown", ct);
             if (installedVersion is not null)
             {
                 _logMessage($"markitdown {installedVersion} のインストールが完了したのだ");
@@ -169,9 +210,21 @@ public class PythonPackageManager
                 _logError("markitdownのインストールに失敗したのだ");
             }
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
         {
             _logError($"markitdown統一処理でエラーなのだ: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            _logError($"markitdown統一処理でI/Oエラーなのだ: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logError($"markitdown統一処理で予期しないエラーなのだ: {ex.Message}");
         }
     }
 
@@ -179,8 +232,9 @@ public class PythonPackageManager
     /// インストール済みパッケージのバージョンを取得する
     /// </summary>
     /// <param name="packageName">パッケージ名</param>
+    /// <param name="ct">キャンセルトークン</param>
     /// <returns>バージョン文字列（未インストールの場合は null）</returns>
-    private async Task<string?> GetPackageVersionAsync(string packageName)
+    private async Task<string?> GetPackageVersionAsync(string packageName, CancellationToken ct = default)
     {
         try
         {
@@ -200,21 +254,37 @@ public class PythonPackageManager
             startInfo.ArgumentList.Add(packageName);
 
             var (exitCode, output, _) = await ProcessUtils.RunAsync(
-                startInfo, TimeoutSettings.PythonVersionCheckTimeoutMs);
+                startInfo, TimeoutSettings.PythonVersionCheckTimeoutMs, ct);
 
             if (exitCode != 0 || string.IsNullOrEmpty(output))
                 return null;
 
+            const string versionPrefix = "Version:";
             foreach (var line in output.Split('\n'))
             {
-                if (line.StartsWith("Version:", StringComparison.OrdinalIgnoreCase))
-                    return line["Version:".Length..].Trim();
+                if (line.StartsWith(versionPrefix, StringComparison.OrdinalIgnoreCase))
+                    return line.AsSpan(versionPrefix.Length).Trim().ToString();
             }
 
             return null;
         }
-        catch
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
+            throw;
+        }
+        catch (InvalidOperationException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to get {packageName} version: {ex.Message}");
+            return null;
+        }
+        catch (IOException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to get {packageName} version: {ex.Message}");
+            return null;
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to get {packageName} version: {ex.Message}");
             return null;
         }
     }
@@ -225,13 +295,13 @@ public class PythonPackageManager
     /// onnxruntime 1.24.1+ しか利用できないため、依存を先にインストールしてから
     /// markitdown 本体を --no-deps で入れる。
     /// </summary>
-    private async Task InstallMarkItDownWithPipAsync()
+    private async Task InstallMarkItDownWithPipAsync(CancellationToken ct)
     {
         try
         {
             // 1. extras 依存パッケージを先にインストール（markitdown[all] の依存群）
             _logMessage("markitdownの依存パッケージをインストール中なのだ...");
-            await RunPipInstallAsync(
+            await RunPipInstallAsync(ct,
                 "--upgrade",
                 "magika>=0.6.1",
                 "beautifulsoup4", "charset-normalizer", "defusedxml", "markdownify",
@@ -244,21 +314,33 @@ public class PythonPackageManager
             // 2. markitdown 本体を --upgrade --no-deps で最新版をインストール
             //    （onnxruntime<=1.20.1 制約を回避するため）
             _logMessage("markitdown最新版をインストール中なのだ...");
-            await RunPipInstallAsync(
+            await RunPipInstallAsync(ct,
                 "--upgrade", "--no-deps",
                 "markitdown");
             _logMessage("markitdown最新版のインストールが完了したのだ。");
         }
-        catch (Exception ex)
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (InvalidOperationException ex)
         {
             _logError($"markitdownインストールでエラーなのだ: {ex.Message}");
+        }
+        catch (IOException ex)
+        {
+            _logError($"markitdownインストールでI/Oエラーなのだ: {ex.Message}");
+        }
+        catch (Exception ex)
+        {
+            _logError($"markitdownインストールで予期しないエラーなのだ: {ex.Message}");
         }
     }
 
     /// <summary>
     /// pip install を任意の引数で実行する
     /// </summary>
-    private async Task RunPipInstallAsync(params string[] args)
+    private async Task RunPipInstallAsync(CancellationToken ct, params string[] args)
     {
         var startInfo = new ProcessStartInfo
         {
@@ -278,7 +360,7 @@ public class PythonPackageManager
             startInfo.ArgumentList.Add(arg);
 
         var (exitCode, output, error) = await ProcessUtils.RunAsync(
-            startInfo, TimeoutSettings.PackageInstallTimeoutMs);
+            startInfo, TimeoutSettings.PackageInstallTimeoutMs, ct);
 
         if (!string.IsNullOrEmpty(output))
             _logMessage($"pip出力: {output.TrimEnd()}");

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
@@ -74,7 +75,15 @@ public class FileProcessor
 
             return PathType.None;
         }
-        catch
+        catch (ArgumentException)
+        {
+            return PathType.None;
+        }
+        catch (PathTooLongException)
+        {
+            return PathType.None;
+        }
+        catch (NotSupportedException)
         {
             return PathType.None;
         }
@@ -108,7 +117,7 @@ public class FileProcessor
 
         if (files.Count > 0 || folders.Count > 0)
         {
-            await ProcessFilesWithMarkItDownAsync(new List<string>(files), new List<string>(folders));
+            await ProcessFilesWithMarkItDownAsync(new List<string>(files), new List<string>(folders)).ConfigureAwait(false);
         }
     }
 
@@ -123,7 +132,7 @@ public class FileProcessor
         {
             // MarkItDownライブラリの利用可能性を事前にチェック
             _logMessage("MarkItDownライブラリの利用可能性をチェック中なのだ...");
-            if (!await _markItDownProcessor.CheckMarkItDownAvailabilityAsync())
+            if (!await _markItDownProcessor.CheckMarkItDownAvailabilityAsync().ConfigureAwait(false))
             {
                 _logMessage("MarkItDownライブラリが利用できなかったのだ。処理を中止するのだ。");
                 return;
@@ -161,7 +170,7 @@ public class FileProcessor
                     {
                         batchTasks[j] = ProcessSingleFileAsync(appDir, fileArray[i + j]);
                     }
-                    await Task.WhenAll(batchTasks);
+                    await Task.WhenAll(batchTasks).ConfigureAwait(false);
                 }
             }
 
@@ -177,7 +186,7 @@ public class FileProcessor
                     {
                         batchTasks[j] = ProcessSingleFolderAsync(appDir, folderArray[i + j]);
                     }
-                    await Task.WhenAll(batchTasks);
+                    await Task.WhenAll(batchTasks).ConfigureAwait(false);
                 }
             }
 
@@ -213,7 +222,7 @@ public class FileProcessor
 
             // 単一ファイルのリストを作成
             var files = new[] { filePath };
-            var folders = new string[] { };
+            var folders = Array.Empty<string>();
 
             // JSON文字列をファイルに保存して、ファイルパスを渡す
             var tempDirectory = Path.GetTempPath();
@@ -225,11 +234,11 @@ public class FileProcessor
             var filePathsJson = JsonSerializer.Serialize(files, AppJsonContext.Default.StringArray);
             var folderPathsJson = JsonSerializer.Serialize(folders, AppJsonContext.Default.StringArray);
 
-            File.WriteAllText(tempFilePathsJson, filePathsJson, utf8NoBom);
-            File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);
+            await File.WriteAllTextAsync(tempFilePathsJson, filePathsJson, utf8NoBom).ConfigureAwait(false);
+            await File.WriteAllTextAsync(tempFolderPathsJson, folderPathsJson, utf8NoBom).ConfigureAwait(false);
 
             // Pythonスクリプトを実行
-            await _markItDownProcessor.ExecuteMarkItDownConvertScriptAsync(appDir, tempFilePathsJson, tempFolderPathsJson);
+            await _markItDownProcessor.ExecuteMarkItDownConvertScriptAsync(appDir, tempFilePathsJson, tempFolderPathsJson).ConfigureAwait(false);
             _logMessage($"ファイル処理完了なのだ: {filePath}");
         }
         catch (Exception ex)
@@ -258,7 +267,7 @@ public class FileProcessor
             _logMessage($"フォルダ処理開始なのだ: {folderPath}");
 
             // 単一フォルダのリストを作成
-            var files = new string[] { };
+            var files = Array.Empty<string>();
             var folders = new[] { folderPath };
 
             // JSON文字列をファイルに保存して、ファイルパスを渡す
@@ -271,11 +280,11 @@ public class FileProcessor
             var filePathsJson = JsonSerializer.Serialize(files, AppJsonContext.Default.StringArray);
             var folderPathsJson = JsonSerializer.Serialize(folders, AppJsonContext.Default.StringArray);
 
-            File.WriteAllText(tempFilePathsJson, filePathsJson, utf8NoBom);
-            File.WriteAllText(tempFolderPathsJson, folderPathsJson, utf8NoBom);
+            await File.WriteAllTextAsync(tempFilePathsJson, filePathsJson, utf8NoBom).ConfigureAwait(false);
+            await File.WriteAllTextAsync(tempFolderPathsJson, folderPathsJson, utf8NoBom).ConfigureAwait(false);
 
             // Pythonスクリプトを実行
-            await _markItDownProcessor.ExecuteMarkItDownConvertScriptAsync(appDir, tempFilePathsJson, tempFolderPathsJson);
+            await _markItDownProcessor.ExecuteMarkItDownConvertScriptAsync(appDir, tempFilePathsJson, tempFolderPathsJson).ConfigureAwait(false);
             _logMessage($"フォルダ処理完了なのだ: {folderPath}");
         }
         catch (Exception ex)
@@ -304,7 +313,11 @@ public class FileProcessor
                 _logMessage($"一時ファイルを削除したのだ: {path}");
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            _logError($"一時ファイル削除に失敗したのだ: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
         {
             _logError($"一時ファイル削除に失敗したのだ: {ex.Message}");
         }

@@ -107,11 +107,20 @@ internal static class Program
             Logger.Log($"更新チェック: リポジトリ: {repoUrl}, チャンネル: {channel}", LogLevel.Info);
 
             // 更新チェック（タイムアウト付き）
+            // Velopack の CheckForUpdatesAsync はキャンセルトークンを受け付けないため、
+            // Task.WhenAny でタイムアウト競争を実装する
             UpdateInfo? updateInfo;
             try
             {
-                using var cts = new CancellationTokenSource(UpdateCheckTimeoutMs);
-                updateInfo = updateManager.CheckForUpdatesAsync().GetAwaiter().GetResult();
+                var checkTask = updateManager.CheckForUpdatesAsync();
+                var timeoutTask = Task.Delay(UpdateCheckTimeoutMs);
+                var completed = Task.WhenAny(checkTask, timeoutTask).GetAwaiter().GetResult();
+                if (completed == timeoutTask)
+                {
+                    Logger.Log("更新チェックがタイムアウトしました。", LogLevel.Warning);
+                    return;
+                }
+                updateInfo = checkTask.GetAwaiter().GetResult();
             }
             catch (OperationCanceledException)
             {

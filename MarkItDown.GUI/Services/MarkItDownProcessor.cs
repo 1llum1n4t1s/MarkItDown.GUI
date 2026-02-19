@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading.Tasks;
 
 namespace MarkItDown.GUI.Services;
 
@@ -61,13 +62,13 @@ public class MarkItDownProcessor
             var appDir = Directory.GetCurrentDirectory();
             _logMessage($"C#側アプリケーションディレクトリなのだ: {appDir}");
                 
-            // Pythonスクリプトを作成して実行
+            // Pythonスクリプトを一時ディレクトリに作成して実行（アプリ作業ディレクトリへの書き込みを避ける）
             var checkScript = CreateMarkItDownCheckScript(appDir);
-            var scriptPath = Path.Combine(appDir, "check_markitdown.py");
+            var scriptPath = Path.Combine(Path.GetTempPath(), $"check_markitdown_{Guid.NewGuid():N}.py");
                 
             try
             {
-                File.WriteAllText(scriptPath, checkScript, Encoding.UTF8);
+                await File.WriteAllTextAsync(scriptPath, checkScript, Encoding.UTF8).ConfigureAwait(false);
                 _logMessage("チェックスクリプト作成完了なのだ");
 
                 // ProcessUtils経由でProcessStartInfoを作成
@@ -83,7 +84,7 @@ public class MarkItDownProcessor
 
                 var stopwatch = System.Diagnostics.Stopwatch.StartNew();
                 var (exitCode, output, error) = await ProcessUtils.RunAsync(
-                    startInfo, TimeoutSettings.MarkItDownCheckTimeoutMs);
+                    startInfo, TimeoutSettings.MarkItDownCheckTimeoutMs).ConfigureAwait(false);
                 stopwatch.Stop();
 
                 _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
@@ -122,16 +123,30 @@ public class MarkItDownProcessor
                     {
                         File.Delete(scriptPath);
                     }
-                    catch (Exception ex)
+                    catch (IOException ex)
+                    {
+                        _logError($"一時ファイル削除に失敗したのだ: {ex.Message}");
+                    }
+                    catch (UnauthorizedAccessException ex)
                     {
                         _logError($"一時ファイル削除に失敗したのだ: {ex.Message}");
                     }
                 }
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            _logError($"MarkItDownライブラリチェック中にI/Oエラーなのだ: {ex.Message}");
+            return false;
+        }
+        catch (InvalidOperationException ex)
         {
             _logError($"MarkItDownライブラリチェック中にエラーなのだ: {ex.Message}");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            _logError($"MarkItDownライブラリチェック中に予期しないエラーなのだ: {ex.Message}");
             return false;
         }
     }
@@ -198,7 +213,7 @@ public class MarkItDownProcessor
             {
                 if (!string.IsNullOrEmpty(e.Data))
                 {
-                    _logMessage(e.Data);
+                    _logError(e.Data);
                 }
             };
 
@@ -209,7 +224,7 @@ public class MarkItDownProcessor
             using var cts = new System.Threading.CancellationTokenSource(TimeoutSettings.FileConversionTimeoutMs);
             try
             {
-                await process.WaitForExitAsync(cts.Token);
+                await process.WaitForExitAsync(cts.Token).ConfigureAwait(false);
                 stopwatch.Stop();
                 _logMessage($"Process execution time: {stopwatch.ElapsedMilliseconds}ms");
                 _logMessage($"Pythonスクリプト実行完了なのだ - 終了コード: {process.ExitCode}");
@@ -225,9 +240,19 @@ public class MarkItDownProcessor
                 }
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            _logError($"Pythonスクリプト実行中にI/Oエラーなのだ: {ex.Message}");
+            _logMessage($"スタックトレースなのだ: {ex.StackTrace}");
+        }
+        catch (InvalidOperationException ex)
         {
             _logError($"Pythonスクリプト実行中にエラーなのだ: {ex.Message}");
+            _logMessage($"スタックトレースなのだ: {ex.StackTrace}");
+        }
+        catch (Exception ex)
+        {
+            _logError($"Pythonスクリプト実行中に予期しないエラーなのだ: {ex.Message}");
             _logMessage($"スタックトレースなのだ: {ex.StackTrace}");
         }
     }

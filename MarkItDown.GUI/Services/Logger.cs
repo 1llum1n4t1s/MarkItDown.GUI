@@ -95,7 +95,18 @@ public static class Logger
 
         if (!Directory.Exists(config.LogDirectory))
         {
-            Directory.CreateDirectory(config.LogDirectory);
+            try
+            {
+                Directory.CreateDirectory(config.LogDirectory);
+            }
+            catch (IOException)
+            {
+                // ログディレクトリが作成できない場合は続行（コンソール出力のみ）
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // 権限がない場合はコンソール出力のみ
+            }
         }
 
         var nlogConfig = new LoggingConfiguration();
@@ -151,7 +162,7 @@ public static class Logger
     /// <param name="level">ログレベル（デフォルト: Info）</param>
     public static void LogLines(string[] messages, LogLevel level = LogLevel.Info)
     {
-        if (messages == null || messages.Length == 0) return;
+        if (messages is null || messages.Length == 0) return;
         if (level < MinLogLevel) return;
 
         var nlogLevel = ToNLogLevel(level);
@@ -227,13 +238,21 @@ public static class Logger
                         }
                     }
                 }
-                catch (Exception ex)
+                catch (IOException ex)
+                {
+                    Log($"ログファイルの削除に失敗しました: {Path.GetFileName(file)} - {ex.Message}", LogLevel.Warning);
+                }
+                catch (UnauthorizedAccessException ex)
                 {
                     Log($"ログファイルの削除に失敗しました: {Path.GetFileName(file)} - {ex.Message}", LogLevel.Warning);
                 }
             }
         }
-        catch (Exception ex)
+        catch (IOException ex)
+        {
+            Log($"ログファイルのクリーンアップ中にエラーが発生しました: {ex.Message}", LogLevel.Warning);
+        }
+        catch (UnauthorizedAccessException ex)
         {
             Log($"ログファイルのクリーンアップ中にエラーが発生しました: {ex.Message}", LogLevel.Warning);
         }

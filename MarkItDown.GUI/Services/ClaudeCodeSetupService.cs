@@ -161,9 +161,25 @@ public sealed class ClaudeCodeSetupService
         using var process = new Process { StartInfo = psi };
         process.Start();
 
-        var stdout = await process.StandardOutput.ReadToEndAsync(ct);
-        var stderr = await process.StandardError.ReadToEndAsync(ct);
-        await process.WaitForExitAsync(ct);
+        using var installCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        installCts.CancelAfter(300_000); // npm install は最大5分
+
+        string stderr;
+        try
+        {
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(installCts.Token);
+            var stderrTask = process.StandardError.ReadToEndAsync(installCts.Token);
+            await process.WaitForExitAsync(installCts.Token);
+            await Task.WhenAll(stdoutTask, stderrTask);
+            _ = await stdoutTask; // stdout は現時点では使用しないが、バッファを消費する
+            stderr = await stderrTask;
+        }
+        catch (OperationCanceledException)
+        {
+            try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+            ct.ThrowIfCancellationRequested();
+            throw new TimeoutException("Claude Code CLI のインストールがタイムアウトしました（5分）。");
+        }
 
         if (process.ExitCode != 0)
         {
@@ -241,9 +257,24 @@ public sealed class ClaudeCodeSetupService
 
             var stdoutTask = proc.StandardOutput.ReadToEndAsync(cts.Token);
             var stderrTask = proc.StandardError.ReadToEndAsync(cts.Token);
-            await Task.WhenAll(stdoutTask, stderrTask);
-            await proc.WaitForExitAsync(cts.Token);
+
+            try
+            {
+                await proc.WaitForExitAsync(cts.Token);
+                await Task.WhenAll(stdoutTask, stderrTask);
+            }
+            catch (OperationCanceledException)
+            {
+                try { if (!proc.HasExited) proc.Kill(entireProcessTree: true); } catch { }
+                ct.ThrowIfCancellationRequested();
+                return false; // タイムアウト時は未ログインとして扱う
+            }
+
             return proc.ExitCode == 0;
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // 呼び出し元のキャンセルは伝播する
         }
         catch
         {
@@ -272,24 +303,30 @@ public sealed class ClaudeCodeSetupService
 
         using var loginProcess = Process.Start(psi);
 
-        for (var i = 0; i < LoginMaxPolls; i++)
+        try
         {
-            ct.ThrowIfCancellationRequested();
-            await Task.Delay(LoginPollIntervalMs, ct);
-
-            progress?.Report($"認証完了を待っています... ({(i + 1) * LoginPollIntervalMs / 1000}秒経過)");
-            _statusCallback?.Invoke($"認証完了を待っています... ({(i + 1) * LoginPollIntervalMs / 1000}秒経過)");
-
-            if (await IsLoggedInAsync(ct))
+            for (var i = 0; i < LoginMaxPolls; i++)
             {
-                progress?.Report("認証が完了しました。");
-                _log("Claude 認証が完了したのだ！");
-                try { if (loginProcess is not null && !loginProcess.HasExited) loginProcess.Kill(); } catch { }
-                return;
+                ct.ThrowIfCancellationRequested();
+                await Task.Delay(LoginPollIntervalMs, ct);
+
+                progress?.Report($"認証完了を待っています... ({(i + 1) * LoginPollIntervalMs / 1000}秒経過)");
+                _statusCallback?.Invoke($"認証完了を待っています... ({(i + 1) * LoginPollIntervalMs / 1000}秒経過)");
+
+                if (await IsLoggedInAsync(ct))
+                {
+                    progress?.Report("認証が完了しました。");
+                    _log("Claude 認証が完了したのだ！");
+                    return;
+                }
             }
         }
+        finally
+        {
+            // loginProcess は using で Dispose されるが、終了前にプロセスを Kill する
+            try { if (loginProcess is not null && !loginProcess.HasExited) loginProcess.Kill(entireProcessTree: true); } catch { }
+        }
 
-        try { if (loginProcess is not null && !loginProcess.HasExited) loginProcess.Kill(); } catch { }
         throw new TimeoutException("認証がタイムアウトしました（10分）。");
     }
 
@@ -322,9 +359,24 @@ public sealed class ClaudeCodeSetupService
 
             var stdoutTask = process.StandardOutput.ReadToEndAsync(cts.Token);
             var stderrTask = process.StandardError.ReadToEndAsync(cts.Token);
-            await Task.WhenAll(stdoutTask, stderrTask);
-            await process.WaitForExitAsync(cts.Token);
+
+            try
+            {
+                await process.WaitForExitAsync(cts.Token);
+                await Task.WhenAll(stdoutTask, stderrTask);
+            }
+            catch (OperationCanceledException)
+            {
+                try { if (!process.HasExited) process.Kill(entireProcessTree: true); } catch { }
+                ct.ThrowIfCancellationRequested();
+                return false; // タイムアウト時は false を返す
+            }
+
             return process.ExitCode == 0;
+        }
+        catch (OperationCanceledException)
+        {
+            throw; // 呼び出し元のキャンセルは伝播する
         }
         catch
         {

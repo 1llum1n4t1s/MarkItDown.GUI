@@ -85,9 +85,9 @@ public sealed class WebScraperService : IDisposable
         {
             // Reddit は JSON API で取得 → C# 側で処理
             _statusCallback?.Invoke("Reddit API からデータを取得中...");
-            var result = await ScrapeRedditAsync(url, ct);
+            var result = await ScrapeRedditAsync(url, ct).ConfigureAwait(false);
             var json = JsonSerializer.Serialize(result, AppJsonIndentedContext.Default.RedditThreadData);
-            await File.WriteAllTextAsync(outputPath, json, System.Text.Encoding.UTF8, ct);
+            await File.WriteAllTextAsync(outputPath, json, System.Text.Encoding.UTF8, ct).ConfigureAwait(false);
             _logMessage($"JSONファイルを出力したのだ: {outputPath}");
         }
         else if (siteType == SiteType.XTwitter)
@@ -108,7 +108,7 @@ public sealed class WebScraperService : IDisposable
             }
             _statusCallback?.Invoke($"X.com (@{username}) のスクレイピング中...");
             _logMessage($"X.com 専用スクレイピングを開始するのだ: @{username}");
-            await _playwrightScraper.ScrapeXTwitterAsync(username, outputDir, ct);
+            await _playwrightScraper.ScrapeXTwitterAsync(username, outputDir, ct).ConfigureAwait(false);
 
             // X.comはデータが膨大になるためClaude整形をスキップ
             _statusCallback?.Invoke("スクレイピング完了");
@@ -144,7 +144,7 @@ public sealed class WebScraperService : IDisposable
                 _statusCallback?.Invoke("Instagram 投稿のスクレイピング中...");
                 _logMessage($"Instagram 投稿/リールのスクレイピングを開始するのだ: {url}");
             }
-            await _playwrightScraper.ScrapeInstagramAsync(target, outputDir, ct);
+            await _playwrightScraper.ScrapeInstagramAsync(target, outputDir, ct).ConfigureAwait(false);
 
             // Instagram はメディアファイルのみダウンロードのためClaude整形不要
             _statusCallback?.Invoke("スクレイピング完了");
@@ -160,11 +160,11 @@ public sealed class WebScraperService : IDisposable
             // HTTP + Claude ガイド型でスクレイピング（ブラウザ不要）
             _statusCallback?.Invoke("HTTP でスクレイピング中...");
             _logMessage("HTTP + Claude ガイド型でスクレイピングするのだ（ブラウザ不使用）...");
-            await _playwrightScraper.ScrapeWithHttpAsync(url, outputPath, ct);
+            await _playwrightScraper.ScrapeWithHttpAsync(url, outputPath, ct).ConfigureAwait(false);
         }
 
         // Claude で JSON を整形・まとめし、3ファイル出力する
-        await ProcessJsonWithClaudeAsync(outputPath, ct);
+        await ProcessJsonWithClaudeAsync(outputPath, ct).ConfigureAwait(false);
 
         _statusCallback?.Invoke("スクレイピング完了");
     }
@@ -278,7 +278,7 @@ public sealed class WebScraperService : IDisposable
 
         try
         {
-            var rawJson = await File.ReadAllTextAsync(originPath, System.Text.Encoding.UTF8, ct);
+            var rawJson = await File.ReadAllTextAsync(originPath, System.Text.Encoding.UTF8, ct).ConfigureAwait(false);
 
             if (string.IsNullOrWhiteSpace(rawJson))
             {
@@ -294,11 +294,11 @@ public sealed class WebScraperService : IDisposable
             string? formattedJson;
             if (rawJson.Length <= chunkThreshold)
             {
-                formattedJson = await FormatJsonChunkWithClaudeAsync(rawJson, ct);
+                formattedJson = await FormatJsonChunkWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
             }
             else
             {
-                formattedJson = await FormatLargeJsonWithClaudeAsync(rawJson, ct);
+                formattedJson = await FormatLargeJsonWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
             }
 
             if (!string.IsNullOrWhiteSpace(formattedJson))
@@ -306,7 +306,7 @@ public sealed class WebScraperService : IDisposable
                 try
                 {
                     JsonSerializer.Deserialize(formattedJson, AppJsonContext.Default.JsonElement);
-                    await WriteClaudeOutputAsync(formattedJson, dir, nameWithoutExt, timestamp, "整形済", "json", ct);
+                    await WriteClaudeOutputAsync(formattedJson, dir, nameWithoutExt, timestamp, "整形済", "json", ct).ConfigureAwait(false);
                 }
                 catch (JsonException)
                 {
@@ -322,15 +322,20 @@ public sealed class WebScraperService : IDisposable
             _statusCallback?.Invoke("Claude でJSONまとめ中...");
             _logMessage("Claude でJSONまとめを開始するのだ...");
 
-            var summaryMd = await SummarizeJsonWithClaudeAsync(rawJson, ct);
-            await WriteClaudeOutputAsync(summaryMd, dir, nameWithoutExt, timestamp, "まとめ済", "md", ct);
+            var summaryMd = await SummarizeJsonWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
+            await WriteClaudeOutputAsync(summaryMd, dir, nameWithoutExt, timestamp, "まとめ済", "md", ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logMessage("ユーザーによりキャンセルされたのだ。元データのみ保持するのだ。");
+            throw;
         }
         catch (HttpRequestException ex)
         {
             _logError($"Claude への接続に失敗したのだ: {ex.Message}");
             _logMessage("元データのみ保持するのだ。");
         }
-        catch (TaskCanceledException)
+        catch (OperationCanceledException)
         {
             _logMessage("Claude の処理がタイムアウトしたのだ。元データのみ保持するのだ。");
         }
@@ -356,7 +361,7 @@ public sealed class WebScraperService : IDisposable
         }
 
         var path = Path.Combine(directory, $"{baseName}_{suffix}_{timestamp}.{extension}");
-        await File.WriteAllTextAsync(path, content, System.Text.Encoding.UTF8, ct);
+        await File.WriteAllTextAsync(path, content, System.Text.Encoding.UTF8, ct).ConfigureAwait(false);
         _logMessage($"{suffix}出力完了なのだ: {path}");
         return path;
     }
@@ -366,7 +371,7 @@ public sealed class WebScraperService : IDisposable
     /// </summary>
     private async Task<string?> FormatJsonChunkWithClaudeAsync(string rawJson, CancellationToken ct)
     {
-        return await CallClaudeAsync(FormatSystemPrompt, BuildFormatUserPrompt(rawJson), ct);
+        return await CallClaudeAsync(FormatSystemPrompt, BuildFormatUserPrompt(rawJson), ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -387,7 +392,7 @@ public sealed class WebScraperService : IDisposable
                 root.TryGetProperty("pages", out var pages) &&
                 pages.ValueKind == JsonValueKind.Array)
             {
-                return await FormatMultiPageJsonAsync(root, pages, ct);
+                return await FormatMultiPageJsonAsync(root, pages, ct).ConfigureAwait(false);
             }
 
             // 単一オブジェクトの場合、content配列を分割して処理
@@ -395,17 +400,17 @@ public sealed class WebScraperService : IDisposable
                 root.TryGetProperty("content", out var content) &&
                 content.ValueKind == JsonValueKind.Array)
             {
-                return await FormatSinglePageLargeJsonAsync(root, content, ct);
+                return await FormatSinglePageLargeJsonAsync(root, content, ct).ConfigureAwait(false);
             }
 
             // その他の場合は分割せずにそのまま送信（サイズ制限超えでも試行）
             _logMessage("JSONの構造が分割に適していないため、一括で整形を試みるのだ...");
-            return await FormatJsonChunkWithClaudeAsync(rawJson, ct);
+            return await FormatJsonChunkWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
         }
         catch (JsonException)
         {
             _logError("JSON解析エラーのため、一括で整形を試みるのだ...");
-            return await FormatJsonChunkWithClaudeAsync(rawJson, ct);
+            return await FormatJsonChunkWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
         }
     }
 
@@ -425,7 +430,7 @@ public sealed class WebScraperService : IDisposable
             _logMessage($"ページ {i + 1}/{pageCount} を整形中なのだ...");
 
             var pageJson = JsonSerializer.Serialize(pages[i], AppJsonIndentedContext.Default.JsonElement);
-            var formatted = await FormatJsonChunkWithClaudeAsync(pageJson, ct);
+            var formatted = await FormatJsonChunkWithClaudeAsync(pageJson, ct).ConfigureAwait(false);
 
             if (!string.IsNullOrWhiteSpace(formatted))
             {
@@ -476,7 +481,7 @@ public sealed class WebScraperService : IDisposable
             _logMessage($"content要素 {i + 1}/{itemCount} を整形中なのだ...");
 
             var itemJson = JsonSerializer.Serialize(contentArray[i], AppJsonIndentedContext.Default.JsonElement);
-            var formatted = await FormatJsonChunkWithClaudeAsync(itemJson, ct);
+            var formatted = await FormatJsonChunkWithClaudeAsync(itemJson, ct).ConfigureAwait(false);
 
             if (!string.IsNullOrWhiteSpace(formatted))
             {
@@ -520,7 +525,7 @@ public sealed class WebScraperService : IDisposable
             return null;
 
         var prompt = $"{systemPrompt}\n\n{userMessage}";
-        var text = await _claudeHost.ExecuteAsync(prompt, "", ct);
+        var text = await _claudeHost.ExecuteAsync(prompt, "", ct).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(text))
             return null;
@@ -644,7 +649,7 @@ public sealed class WebScraperService : IDisposable
     private async Task<string?> SummarizeJsonWithClaudeAsync(string rawJson, CancellationToken ct)
     {
         var userMessage = $"以下のJSONデータを分析し、統計情報と構造化されたまとめをMarkdown形式で作成してください:\n\n{rawJson}";
-        return await CallClaudeAsync(SummarySystemPrompt, userMessage, ct);
+        return await CallClaudeAsync(SummarySystemPrompt, userMessage, ct).ConfigureAwait(false);
     }
 
     // ────────────────────────────────────────────
@@ -920,10 +925,10 @@ public sealed class WebScraperService : IDisposable
         using var request = new HttpRequestMessage(HttpMethod.Get, jsonUrl);
         request.Headers.Accept.ParseAdd("application/json");
 
-        using var response = await _httpClient.SendAsync(request, ct);
+        using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
 
-        var body = await response.Content.ReadAsStringAsync(ct);
+        var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         _logMessage($"APIレスポンス取得完了なのだ (サイズ: {body.Length:#,0} bytes)");
 
         var root = JsonSerializer.Deserialize(body, AppJsonContext.Default.JsonElement);

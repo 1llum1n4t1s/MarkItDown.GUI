@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace MarkItDown.GUI.Services;
@@ -35,9 +36,19 @@ public class AppSettings
                     CreateDefaultSettings();
                 }
             }
-            catch (Exception ex)
+            catch (IOException ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to load settings: {ex.Message}");
+                CreateDefaultSettings();
+            }
+            catch (XmlException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to parse settings XML: {ex.Message}");
+                CreateDefaultSettings();
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to load settings (access denied): {ex.Message}");
                 CreateDefaultSettings();
             }
         }
@@ -55,7 +66,11 @@ public class AppSettings
                 var value = _settingsDocument?.Root?.Element("UpdateRepoOwner")?.Value;
                 return !string.IsNullOrEmpty(value) ? value : "1llum1n4t1s";
             }
-            catch
+            catch (InvalidOperationException)
+            {
+                return "1llum1n4t1s";
+            }
+            catch (XmlException)
             {
                 return "1llum1n4t1s";
             }
@@ -74,7 +89,11 @@ public class AppSettings
                 var value = _settingsDocument?.Root?.Element("UpdateRepoName")?.Value;
                 return !string.IsNullOrEmpty(value) ? value : "MarkItDown.GUI";
             }
-            catch
+            catch (InvalidOperationException)
+            {
+                return "MarkItDown.GUI";
+            }
+            catch (XmlException)
             {
                 return "MarkItDown.GUI";
             }
@@ -93,7 +112,11 @@ public class AppSettings
                 var value = _settingsDocument?.Root?.Element("UpdateChannel")?.Value;
                 return !string.IsNullOrEmpty(value) ? value : "release";
             }
-            catch
+            catch (InvalidOperationException)
+            {
+                return "release";
+            }
+            catch (XmlException)
             {
                 return "release";
             }
@@ -112,7 +135,11 @@ public class AppSettings
                 var version = _settingsDocument?.Root?.Element("PythonVersion")?.Value;
                 return string.IsNullOrWhiteSpace(version) ? null : version.Trim();
             }
-            catch
+            catch (InvalidOperationException)
+            {
+                return null;
+            }
+            catch (XmlException)
             {
                 return null;
             }
@@ -152,9 +179,18 @@ public class AppSettings
                     }
                 }
 
+                EnsureSettingsDirectory();
                 _settingsDocument?.Save(SettingsPath);
             }
-            catch (Exception ex)
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to save PythonVersion: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to save PythonVersion: {ex.Message}");
+            }
+            catch (XmlException ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to save PythonVersion: {ex.Message}");
             }
@@ -173,7 +209,11 @@ public class AppSettings
                 var value = _settingsDocument?.Root?.Element("UseClaudeAI")?.Value;
                 return bool.TryParse(value, out var result) && result;
             }
-            catch
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (XmlException)
             {
                 return false;
             }
@@ -206,9 +246,18 @@ public class AppSettings
                     element.Value = useClaudeAI.ToString().ToLowerInvariant();
                 }
 
+                EnsureSettingsDirectory();
                 _settingsDocument?.Save(SettingsPath);
             }
-            catch (Exception ex)
+            catch (IOException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to save UseClaudeAI: {ex.Message}");
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"Failed to save UseClaudeAI: {ex.Message}");
+            }
+            catch (XmlException ex)
             {
                 System.Diagnostics.Debug.WriteLine($"Failed to save UseClaudeAI: {ex.Message}");
             }
@@ -231,11 +280,32 @@ public class AppSettings
             );
 
             _settingsDocument = new XDocument(root);
+            EnsureSettingsDirectory();
             _settingsDocument.Save(SettingsPath);
         }
-        catch (Exception ex)
+        catch (IOException ex)
         {
             System.Diagnostics.Debug.WriteLine($"Failed to create default settings: {ex.Message}");
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to create default settings: {ex.Message}");
+        }
+        catch (XmlException ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Failed to create default settings: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// 設定ファイルのディレクトリが存在することを保証する
+    /// </summary>
+    private static void EnsureSettingsDirectory()
+    {
+        var directory = Path.GetDirectoryName(SettingsPath);
+        if (!string.IsNullOrEmpty(directory) && !Directory.Exists(directory))
+        {
+            Directory.CreateDirectory(directory);
         }
     }
 }

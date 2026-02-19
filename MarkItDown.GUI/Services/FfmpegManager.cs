@@ -57,9 +57,9 @@ public partial class FfmpegManager
     /// <summary>
     /// 埋め込み ffmpeg を非同期で初期化する
     /// </summary>
-    public async Task InitializeAsync()
+    public async Task InitializeAsync(CancellationToken ct = default)
     {
-        await _ffmpegDetectionSemaphore.WaitAsync();
+        await _ffmpegDetectionSemaphore.WaitAsync(ct);
         try
         {
             _logMessage("ffmpeg環境の初期化を開始するのだ。");
@@ -85,7 +85,7 @@ public partial class FfmpegManager
             }
 
             _logMessage("埋め込み ffmpeg が見つからないため、ダウンロードを試行するのだ。");
-            if (await DownloadAndExtractFfmpegAsync(ffmpegBaseDir))
+            if (await DownloadAndExtractFfmpegAsync(ffmpegBaseDir, ct))
             {
                 _ffmpegAvailable = true;
                 _logMessage($"ffmpeg環境の初期化が完了したのだ: {_ffmpegPath}");
@@ -94,6 +94,11 @@ public partial class FfmpegManager
             {
                 _logError("ffmpeg環境の初期化に失敗したのだ。音声ファイルの変換に制限が発生する可能性があるのだ。");
             }
+        }
+        catch (OperationCanceledException)
+        {
+            _logError("ffmpeg 初期化がキャンセルされたのだ。");
+            throw;
         }
         catch (Exception ex)
         {
@@ -108,7 +113,7 @@ public partial class FfmpegManager
     /// <summary>
     /// gyan.dev から ffmpeg essentials ビルドをダウンロードして展開する
     /// </summary>
-    private async Task<bool> DownloadAndExtractFfmpegAsync(string ffmpegBaseDir)
+    private async Task<bool> DownloadAndExtractFfmpegAsync(string ffmpegBaseDir, CancellationToken ct = default)
     {
         try
         {
@@ -121,8 +126,8 @@ public partial class FfmpegManager
 
             _logMessage($"ffmpeg をダウンロード中なのだ: {downloadUrl}");
             _progressCallback?.Invoke(0);
-            
-            using (var response = await HttpClientForDownload.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead))
+
+            using (var response = await HttpClientForDownload.GetAsync(downloadUrl, HttpCompletionOption.ResponseHeadersRead, ct))
             {
                 response.EnsureSuccessStatusCode();
 
@@ -145,7 +150,7 @@ public partial class FfmpegManager
                     _logMessage($"ダウンロードサイズなのだ: {totalBytes / 1024 / 1024:F2} MB");
                 }
 
-                await using var contentStream = await response.Content.ReadAsStreamAsync();
+                await using var contentStream = await response.Content.ReadAsStreamAsync(ct);
                 await using var fileStream = new FileStream(archivePath, FileMode.Create, FileAccess.Write, FileShare.None);
 
                 var buffer = new byte[81920]; // 80KB — ネットワークI/Oのシステムコール回数を削減
@@ -153,7 +158,7 @@ public partial class FfmpegManager
                 int bytesRead;
                 var lastReportedProgress = 0.0;
 
-                while ((bytesRead = await contentStream.ReadAsync(buffer)) > 0)
+                while ((bytesRead = await contentStream.ReadAsync(buffer, ct)) > 0)
                 {
                     // ダウンロードサイズの追加チェック
                     totalBytesRead += bytesRead;
@@ -163,7 +168,7 @@ public partial class FfmpegManager
                         throw new InvalidOperationException("ダウンロードサイズが上限を超えています");
                     }
 
-                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead));
+                    await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), ct);
                     
                     if (totalBytes > 0)
                     {

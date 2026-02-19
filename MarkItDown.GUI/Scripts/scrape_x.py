@@ -32,7 +32,14 @@ MAX_RELOAD_ATTEMPTS = 5  # 再検索後のツイート要素検出の最大リ�
 
 def log(msg: str):
     """タイムスタンプ付きログ出力（C#側でアイドルタイムアウトをリセットする）"""
-    print(f"[X.com] {msg}", flush=True)
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[X.com {ts}] {msg}", flush=True)
+
+
+def log_error(msg: str):
+    """エラーログを stderr に出力する"""
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[X.com {ts}] ERROR: {msg}", file=sys.stderr, flush=True)
 
 
 def check_playwright():
@@ -64,7 +71,7 @@ def _load_browser_cookies():
         for domain in domains:
             try:
                 jar = source(domain_name=domain)
-            except Exception:
+            except (OSError, PermissionError, TypeError, ValueError):
                 continue
             for c in jar:
                 key = (c.name, c.domain, c.path)
@@ -108,8 +115,8 @@ def _inject_browser_cookies(context) -> bool:
         context.add_cookies(pw_cookies)
         log(f"通常ブラウザから Cookie {len(pw_cookies)} 件を注入したのだ。")
         return True
-    except Exception as e:
-        log(f"Cookie注入中にエラー: {e}")
+    except (RuntimeError, ValueError) as e:
+        log_error(f"Cookie注入中にエラー: {e}")
         return False
 
 
@@ -118,7 +125,8 @@ def _has_auth_cookies(context) -> bool:
     try:
         cookie_names = {c.get("name", "") for c in context.cookies("https://x.com")}
         return "auth_token" in cookie_names and "ct0" in cookie_names
-    except Exception:
+    except (RuntimeError, ValueError) as e:
+        log_error(f"Cookie確認中にエラー: {e}")
         return False
 
 
@@ -227,8 +235,8 @@ def extract_all_tweets_batch(page) -> list[dict]:
             return tweets;
         }""")
         return results or []
-    except Exception as e:
-        log(f"ツイートデータ一括抽出エラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"ツイートデータ一括抽出エラー: {e}")
         return []
 
 
@@ -285,7 +293,7 @@ def _launch_persistent(playwright_module, user_data_dir: str, headless: bool):
             **launch_kwargs,
         )
         log("システムの Chrome (persistent) で起動したのだ")
-    except Exception as e:
+    except (RuntimeError, OSError, TimeoutError) as e:
         log(f"Chrome での起動に失敗、Chromium にフォールバック: {e}")
         context = playwright_module.chromium.launch_persistent_context(
             **launch_kwargs,
@@ -371,8 +379,8 @@ def _is_logged_in(page, context=None) -> bool:
         log("ログイン状態を判定できないため、未ログインとみなすのだ")
         return False
 
-    except Exception as e:
-        log(f"ログイン状態確認中にエラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"ログイン状態確認中にエラー: {e}")
         return False
 
 
@@ -400,9 +408,9 @@ def ensure_login(playwright_module, session_path: str) -> tuple:
         return context, page
 
     # 未ログイン → そのまま headed で手動ログイン待ち
-    log("未ログイン状態なのだ。")
-    log("対処法: 通常のChromeブラウザで x.com にログインしてから再実行してください。")
-    log("このスクリプトは通常ブラウザCookieを自動取り込みしてログインを復元するのだ。")
+    log_error("未ログイン状態なのだ。")
+    log_error("対処法: 通常のChromeブラウザで x.com にログインしてから再実行してください。")
+    log_error("このスクリプトは通常ブラウザCookieを自動取り込みしてログインを復元するのだ。")
     context.close()
     sys.exit(3)
 
@@ -432,9 +440,9 @@ def _manual_login(playwright_module, user_data_dir: str) -> tuple:
 
         try:
             current_url = page.url
-        except Exception:
+        except (RuntimeError, ConnectionError) as e:
             # ブラウザが閉じられた場合
-            log("ブラウザが閉じられたのだ。処理を中断するのだ。")
+            log_error(f"ブラウザが閉じられたのだ。処理を中断するのだ: {e}")
             sys.exit(1)
 
         # 方法1: URLが明確にログイン後のページになった
@@ -457,8 +465,8 @@ def _manual_login(playwright_module, user_data_dir: str) -> tuple:
             if logged_in_el:
                 log(f"ログイン済みDOM要素を検知したのだ！ URL: {current_url}")
                 break
-        except Exception as e:
-            log(f"ログイン状態のDOM検出中にエラーが発生したのだ: {e}")
+        except (RuntimeError, TimeoutError) as e:
+            log_error(f"ログイン状態のDOM検出中にエラーが発生したのだ: {e}")
 
         if elapsed % 30 == 0:
             log(f"ログイン待機中... ({elapsed}秒経過, URL: {current_url})")
@@ -484,7 +492,7 @@ def _check_loading(page) -> bool:
             'div[data-testid="cellInnerDiv"] > div[style*="height: 0"]'
         )
         return spinner is not None and spinner.is_visible()
-    except Exception:
+    except (RuntimeError, TimeoutError):
         return False
 
 
@@ -569,8 +577,8 @@ def _handle_interruptions(page):
             time.sleep(3)
             return
 
-    except Exception as e:
-        log(f"割り込み要素の処理中にエラーが発生したのだ: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"割り込み要素の処理中にエラーが発生したのだ: {e}")
 
 
 def scrape_tweets(page, username: str) -> list[dict]:
@@ -602,8 +610,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
                     dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
                     if oldest_ts is None or dt < oldest_ts:
                         oldest_ts = dt
-                except Exception as e:
-                    log(f"タイムスタンプ解析エラー (値: {ts}): {e}")
+                except (ValueError, TypeError) as e:
+                    log_error(f"タイムスタンプ解析エラー (値: {ts}): {e}")
         if oldest_ts:
             # until は「その日を含まない」ので +1日
             from datetime import timedelta
@@ -620,12 +628,12 @@ def scrape_tweets(page, username: str) -> list[dict]:
 
     # ログインページにリダイレクトされた場合
     if "/login" in page.url or "/i/flow/login" in page.url:
-        log("セッションが切れているのだ。再ログインが必要なのだ。")
+        log_error("セッションが切れているのだ。再ログインが必要なのだ。")
         sys.exit(3)
 
     # ログイン状態を再確認（DOM検査）
     if not _is_logged_in(page, None):
-        log("検索ページでログインが確認できないのだ。再ログインが必要なのだ。")
+        log_error("検索ページでログインが確認できないのだ。再ログインが必要なのだ。")
         sys.exit(3)
 
     # ページの状態をデバッグログ
@@ -635,8 +643,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
         # 検索結果が表示されているか確認
         body_text = page.evaluate("() => document.body ? document.body.innerText.substring(0, 500) : '(empty)'")
         log(f"ページ先頭テキスト: {body_text[:200]}")
-    except Exception as e:
-        log(f"ページデバッグ情報取得エラー: {e}")
+    except (RuntimeError, TimeoutError) as e:
+        log_error(f"ページデバッグ情報取得エラー: {e}")
 
     scroll_count = 0
     no_new_count = 0
@@ -672,8 +680,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
                 time.sleep(random.uniform(2, 4))
                 _human_scroll(page, random.uniform(800, 1500))
                 time.sleep(random.uniform(1, 3))
-            except Exception as e:
-                log(f"  迂回ページ遷移エラー（無視して続行）: {e}")
+            except (RuntimeError, TimeoutError) as e:
+                log_error(f"  迂回ページ遷移エラー（無視して続行）: {e}")
         # until: 付き検索URLで再開（既取得分のスクロールが不要になる）
         until_date = _get_oldest_tweet_date()
         search_url = _build_search_url(until_date)
@@ -690,8 +698,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
                 if tweet_els and len(tweet_els) > 0:
                     log(f"再検索後、ツイート要素を{len(tweet_els)}件検出したのだ。")
                     break
-            except Exception as e:
-                log(f"ツイート要素の検出中にエラーが発生したのだ: {e}")
+            except (RuntimeError, TimeoutError) as e:
+                log_error(f"ツイート要素の検出中にエラーが発生したのだ: {e}")
             if wait_try < MAX_RELOAD_ATTEMPTS - 1:
                 log(f"再検索後のツイート読み込み待機中... ({wait_try + 1}/{MAX_RELOAD_ATTEMPTS})")
                 _handle_interruptions(page)
@@ -718,8 +726,8 @@ def scrape_tweets(page, username: str) -> list[dict]:
                 }""")
                 if error_text:
                     log(f"エラーメッセージ検出: {error_text}")
-            except Exception as e:
-                log(f"デバッグ情報取得エラー: {e}")
+            except (RuntimeError, TimeoutError) as e:
+                log_error(f"デバッグ情報取得エラー: {e}")
 
         new_count = 0
         for data in all_tweet_data:
@@ -829,12 +837,12 @@ def download_images(tweets: list[dict], output_dir: str) -> int:
                     _update_tweet_image_info(tweets, tweet_id, idx, orig_url, filename, True)
                     break
 
-                except Exception as e:
+                except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError, OSError) as e:
                     if retry < 2:
                         log(f"画像DL リトライ {retry + 1}/3: {filename} ({e})")
                         time.sleep(2)
                     else:
-                        log(f"画像DL 失敗: {filename} ({e})")
+                        log_error(f"画像DL 失敗: {filename} ({e})")
                         failed += 1
                         _update_tweet_image_info(tweets, tweet_id, idx, orig_url, filename, False)
 
@@ -888,7 +896,7 @@ def main():
     log(f"=== X.com 専用スクレイピング開始: @{username} ===")
 
     if not check_playwright():
-        log("playwright パッケージがインストールされていないのだ")
+        log_error("playwright パッケージがインストールされていないのだ")
         sys.exit(2)
 
     # 出力ディレクトリ準備（C#側で username サブフォルダは作成済み）
@@ -903,50 +911,57 @@ def main():
     from playwright.sync_api import sync_playwright
 
     context = None
+    playwright_instance = None
     try:
-        with sync_playwright() as p:
-            context, page = ensure_login(p, session_path)
+        playwright_instance = sync_playwright().start()
+        context, page = ensure_login(playwright_instance, session_path)
 
-            # Phase 1: 全ツイート取得
-            log("=== Phase 1: ツイート取得 ===")
-            tweets = scrape_tweets(page, username)
-            log(f"ツイート取得完了: {len(tweets)} 件")
+        # Phase 1: 全ツイート取得
+        log("=== Phase 1: ツイート取得 ===")
+        tweets = scrape_tweets(page, username)
+        log(f"ツイート取得完了: {len(tweets)} 件")
 
-            if len(tweets) == 0:
-                log("ツイートが見つからなかったのだ。ユーザー名を確認してください。")
-                context.close()
-                context = None
-                return
+        if len(tweets) == 0:
+            log("ツイートが見つからなかったのだ。ユーザー名を確認してください。")
+            return
 
-            # ブラウザを閉じる（画像DLにはブラウザ不要）
-            context.close()
-            context = None
-            log("ブラウザを閉じたのだ")
+        # ブラウザを閉じる（画像DLにはブラウザ不要）
+        context.close()
+        context = None
+        log("ブラウザを閉じたのだ")
 
-            # Phase 2: 画像ダウンロード
-            log("=== Phase 2: 画像ダウンロード ===")
-            download_images(tweets, user_output_dir)
+        # Phase 2: 画像ダウンロード
+        log("=== Phase 2: 画像ダウンロード ===")
+        download_images(tweets, user_output_dir)
 
-            # DL成功画像数をカウント
-            image_count = 0
-            for tweet in tweets:
-                details = tweet.get("image_details", [])
-                image_count += sum(1 for d in details if d.get("downloaded", False))
+        # DL成功画像数をカウント
+        image_count = 0
+        for tweet in tweets:
+            details = tweet.get("image_details", [])
+            image_count += sum(1 for d in details if d.get("downloaded", False))
 
-            log(f"=== 完了! ツイート: {len(tweets)} 件, 画像: {image_count} 枚 ===")
+        log(f"=== 完了! ツイート: {len(tweets)} 件, 画像: {image_count} 枚 ===")
 
     except SystemExit:
         raise
+    except KeyboardInterrupt:
+        log("ユーザーによる中断を検知したのだ")
+        sys.exit(130)
     except Exception as e:
-        log(f"致命的エラー: {e}")
-        traceback.print_exc()
+        log_error(f"致命的エラー: {type(e).__name__}: {e}")
+        traceback.print_exc(file=sys.stderr)
         sys.exit(1)
     finally:
         if context:
             try:
                 context.close()
-            except Exception as e:
-                log(f"ブラウザコンテキストのクローズ中にエラーが発生したのだ: {e}")
+            except (RuntimeError, OSError) as e:
+                log_error(f"ブラウザコンテキストのクローズ中にエラーが発生したのだ: {e}")
+        if playwright_instance:
+            try:
+                playwright_instance.stop()
+            except (RuntimeError, OSError) as e:
+                log_error(f"Playwrightの停止中にエラーが発生したのだ: {e}")
 
 
 if __name__ == "__main__":

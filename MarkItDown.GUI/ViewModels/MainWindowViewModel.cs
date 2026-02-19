@@ -142,14 +142,25 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     public MainWindowViewModel()
     {
         _dropZoneBackground = DefaultDropZoneBrush;
-        _ = InitializeManagersAsync().ContinueWith(task =>
+        _ = RunInitializeAsync();
+    }
+
+    /// <summary>
+    /// 初期化を実行し、例外をUIスレッド上で安全にログ出力するラッパー
+    /// </summary>
+    private async Task RunInitializeAsync()
+    {
+        try
         {
-            if (task.IsFaulted)
-            {
-                var ex = task.Exception?.GetBaseException();
-                LogMessage($"初期化エラーなのだ: {ex?.Message}", LogLevel.Error);
-            }
-        }, System.Threading.Tasks.TaskScheduler.FromCurrentSynchronizationContext());
+            await InitializeManagersAsync();
+        }
+        catch (Exception ex)
+        {
+            // InitializeManagersAsync 内で既にキャッチされているが、
+            // 万が一エスケープした例外をUIスレッドで安全にログ出力する
+            await Dispatcher.UIThread.InvokeAsync(() =>
+                LogMessage($"初期化エラーなのだ: {ex.Message}", LogLevel.Error));
+        }
     }
 
     /// <summary>
@@ -753,8 +764,10 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     // ────────────────────────────────────────────
-    //  Instagram ログインダイアログ
+    //  IDisposable 実装
     // ────────────────────────────────────────────
+
+    private bool _disposed;
 
     /// <summary>
     /// リソースを解放する
@@ -779,22 +792,32 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     /// <param name="disposing">マネージドリソースも解放するかどうか</param>
     protected virtual void Dispose(bool disposing)
     {
+        if (_disposed)
+        {
+            return;
+        }
+        _disposed = true;
+
         if (disposing)
         {
+            // 残っているログバッチを全てフラッシュ
+            try
+            {
+                FlushLogBatchFinal();
+            }
+            catch
+            {
+                // 終了時のログフラッシュ失敗は無視
+            }
+
+            // IDisposable を実装しているサービスを解放
             try
             {
                 _webScraperService?.Dispose();
             }
             catch (Exception ex)
             {
-                try
-                {
-                    LogMessage($"リソース解放中にエラーなのだ: {ex.Message}", LogLevel.Error);
-                }
-                catch
-                {
-                    // ログ出力も失敗する場合は無視
-                }
+                System.Diagnostics.Debug.WriteLine($"WebScraperService解放中にエラー: {ex.Message}");
             }
         }
     }

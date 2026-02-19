@@ -11,6 +11,9 @@ namespace MarkItDown.GUI;
 public partial class App : Application
 {
     private MainWindow? _mainWindow;
+    private IClassicDesktopStyleApplicationLifetime? _desktop;
+    /// <summary>二重解放防止フラグ</summary>
+    private bool _resourcesCleanedUp;
 
     /// <summary>
     /// アプリケーションの初期化
@@ -27,11 +30,12 @@ public partial class App : Application
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            _desktop = desktop;
             _mainWindow = new MainWindow();
             desktop.MainWindow = _mainWindow;
-            
+
             desktop.ShutdownRequested += OnShutdownRequested;
-            
+
             AppDomain.CurrentDomain.ProcessExit += OnProcessExit;
         }
 
@@ -51,14 +55,28 @@ public partial class App : Application
     /// </summary>
     private void OnProcessExit(object? sender, EventArgs e)
     {
+        // ShutdownRequested と重複して呼ばれた場合でも安全に処理する
         CleanupResources();
+
+        // ProcessExit ハンドラーは登録解除（GC ルートからの参照を切る）
+        AppDomain.CurrentDomain.ProcessExit -= OnProcessExit;
+        if (_desktop is not null)
+        {
+            _desktop.ShutdownRequested -= OnShutdownRequested;
+        }
     }
 
     /// <summary>
-    /// リソースをクリーンアップする
+    /// リソースをクリーンアップする（二重呼び出し安全）
     /// </summary>
     private void CleanupResources()
     {
+        if (_resourcesCleanedUp)
+        {
+            return;
+        }
+        _resourcesCleanedUp = true;
+
         try
         {
             if (_mainWindow?.DataContext is IDisposable disposable)

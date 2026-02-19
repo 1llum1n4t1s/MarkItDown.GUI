@@ -42,7 +42,14 @@ public partial class MainWindow : Avalonia.Controls.Window
     /// <param name="e">イベント引数</param>
     private void MainWindow_Closed(object? sender, EventArgs e)
     {
+        // ViewModel のイベント購読を解除（GC ルート解放）
         ViewModel.PropertyChanged -= ViewModel_PropertyChanged;
+
+        // ドロップゾーンのハンドラーを解除
+        DropZoneBorder.RemoveHandler(DragDrop.DragOverEvent, DropZone_DragOver);
+        DropZoneBorder.RemoveHandler(DragDrop.DragLeaveEvent, DropZone_DragLeave);
+        DropZoneBorder.RemoveHandler(DragDrop.DropEvent, DropZone_Drop);
+
         ViewModel.Dispose();
     }
 

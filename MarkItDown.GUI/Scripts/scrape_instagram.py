@@ -37,6 +37,11 @@ def log(msg: str):
     print(f"[Instagram] {msg}", flush=True)
 
 
+def log_error(msg: str):
+    """エラーログを stderr に出力する"""
+    print(f"[Instagram] ERROR: {msg}", file=sys.stderr, flush=True)
+
+
 def check_dependencies() -> bool:
     """必要なパッケージがインポートできるかチェック"""
     try:
@@ -108,6 +113,8 @@ def _try_load_session(L, session_dir: str) -> str | None:
         log(f"セッションファイルが見つからないのだ: {session_file}")
         return None
 
+    import instaloader
+
     try:
         L.load_session_from_file(ig_username, session_file)
         test_user = L.test_login()
@@ -117,7 +124,7 @@ def _try_load_session(L, session_dir: str) -> str | None:
         else:
             log("セッションが無効なのだ（test_login が None を返した）。")
             return None
-    except Exception as e:
+    except (instaloader.exceptions.InstaloaderException, OSError) as e:
         log(f"セッション読み込みエラー: {e}")
         return None
 
@@ -154,6 +161,8 @@ def _launch_persistent(playwright_module, user_data_dir: str):
     persistent context でブラウザを起動する。
     channel="chrome" を優先し、失敗時は Chromium にフォールバックする。
     """
+    from playwright.sync_api import Error as PlaywrightError
+
     vp_width = 1280 + random.randint(-40, 40)
     vp_height = 900 + random.randint(-30, 30)
     launch_kwargs = dict(
@@ -169,7 +178,7 @@ def _launch_persistent(playwright_module, user_data_dir: str):
             **launch_kwargs,
         )
         log("システムの Chrome (persistent) で起動したのだ")
-    except Exception as e:
+    except (PlaywrightError, OSError) as e:
         log(f"Chrome での起動に失敗、Chromium にフォールバック: {e}")
         context = playwright_module.chromium.launch_persistent_context(
             **launch_kwargs,
@@ -180,6 +189,8 @@ def _launch_persistent(playwright_module, user_data_dir: str):
 
 def _collect_instagram_cookies(context) -> dict[str, str]:
     """Playwright context から Instagram Cookie を収集する。"""
+    from playwright.sync_api import Error as PlaywrightError
+
     cookies = {}
     try:
         for cookie in context.cookies("https://www.instagram.com"):
@@ -187,7 +198,7 @@ def _collect_instagram_cookies(context) -> dict[str, str]:
             value = cookie.get("value", "")
             if name and value:
                 cookies[name] = value
-    except Exception as e:
+    except PlaywrightError as e:
         log(f"Cookie収集中にエラー: {e}")
     return cookies
 
@@ -197,6 +208,8 @@ def _is_logged_in(page, context) -> bool:
     Instagram にログイン済みか判定する。
     sessionid Cookie と URL/DOM の両方を確認する。
     """
+    from playwright.sync_api import Error as PlaywrightError
+
     current_url = page.url
     cookies = _collect_instagram_cookies(context)
     has_session = bool(cookies.get("sessionid"))
@@ -208,8 +221,9 @@ def _is_logged_in(page, context) -> bool:
         login_input = page.query_selector('input[name="username"], input[name="password"]')
         if login_input:
             return False
-    except Exception:
-        pass
+    except (PlaywrightError, OSError) as e:
+        log_error(f"ログイン状態のDOM確認中にエラー: {e}")
+        # DOM確認に失敗した場合はCookieベースの判定を信頼する
     return True
 
 
@@ -218,57 +232,61 @@ def ensure_login_via_playwright(session_dir: str) -> dict[str, str]:
     Playwright persistent context でログイン確認し、必要なら手動ログインを待つ。
     Returns: Instagram Cookie dict
     """
-    from playwright.sync_api import sync_playwright
+    from playwright.sync_api import Error as PlaywrightError, sync_playwright
 
     user_data_dir = _get_ig_user_data_dir(session_dir)
-    context = None
     try:
         with sync_playwright() as p:
-            log("保存済みプロファイルでInstagramセッション確認中なのだ（headedモード）...")
-            context = _launch_persistent(p, user_data_dir)
-            page = context.pages[0] if context.pages else context.new_page()
-            page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=30000)
-            time.sleep(5)
+            context = None
+            try:
+                log("保存済みプロファイルでInstagramセッション確認中なのだ（headedモード）...")
+                context = _launch_persistent(p, user_data_dir)
+                page = context.pages[0] if context.pages else context.new_page()
+                page.goto("https://www.instagram.com/", wait_until="domcontentloaded", timeout=30000)
+                page.wait_for_timeout(5000)  # Playwrightイベントループを維持しつつ待機
 
-            if _is_logged_in(page, context):
-                cookies = _collect_instagram_cookies(context)
-                log("保存済みセッションが有効なのだ。")
-                log(f"Instagram Cookieを {len(cookies)} 個取得したのだ。")
-                return cookies
+                if _is_logged_in(page, context):
+                    cookies = _collect_instagram_cookies(context)
+                    log("保存済みセッションが有効なのだ。")
+                    log(f"Instagram Cookieを {len(cookies)} 個取得したのだ。")
+                    return cookies
 
-            log("未ログイン状態なのだ。ブラウザでInstagramにログインしてください...")
-            page.goto("https://www.instagram.com/accounts/login/", wait_until="domcontentloaded", timeout=30000)
-            log("ブラウザが開きました。Instagramにログインしてください...")
-            log("ログイン完了を自動検知します。そのままお待ちください。")
+                log("未ログイン状態なのだ。ブラウザでInstagramにログインしてください...")
+                page.goto("https://www.instagram.com/accounts/login/", wait_until="domcontentloaded", timeout=30000)
+                log("ブラウザが開きました。Instagramにログインしてください...")
+                log("ログイン完了を自動検知します。そのままお待ちください。")
 
-            max_wait = 600
-            elapsed = 0
-            poll_interval = 3
-            while elapsed < max_wait:
-                time.sleep(poll_interval)
-                elapsed += poll_interval
-                try:
-                    if _is_logged_in(page, context):
-                        cookies = _collect_instagram_cookies(context)
-                        log("ログイン完了を検知したのだ！")
-                        log(f"Instagram Cookieを {len(cookies)} 個取得したのだ。")
-                        return cookies
-                except Exception as e:
-                    log(f"ログイン状態確認中にエラー: {e}")
-                if elapsed % 30 == 0:
-                    log(f"ログイン待機中... ({elapsed}秒経過, URL: {page.url})")
+                max_wait = 600
+                elapsed = 0
+                poll_interval = 3
+                while elapsed < max_wait:
+                    time.sleep(poll_interval)
+                    elapsed += poll_interval
+                    try:
+                        if _is_logged_in(page, context):
+                            cookies = _collect_instagram_cookies(context)
+                            log("ログイン完了を検知したのだ！")
+                            log(f"Instagram Cookieを {len(cookies)} 個取得したのだ。")
+                            return cookies
+                    except PlaywrightError as e:
+                        log(f"ログイン状態確認中にエラー: {e}")
+                    if elapsed % 30 == 0:
+                        log(f"ログイン待機中... ({elapsed}秒経過, URL: {page.url})")
 
-            log("ログイン待機がタイムアウトしたのだ。(10分)")
-            return {}
-    except Exception as e:
+                log("ログイン待機がタイムアウトしたのだ。(10分)")
+                return {}
+            finally:
+                if context:
+                    try:
+                        context.close()
+                    except PlaywrightError as e:
+                        log(f"ブラウザコンテキストのクローズ中にエラー: {e}")
+    except PlaywrightError as e:
         log(f"Playwrightログイン処理中にエラー: {e}")
         return {}
-    finally:
-        if context:
-            try:
-                context.close()
-            except Exception as e:
-                log(f"ブラウザコンテキストのクローズ中にエラー: {e}")
+    except OSError as e:
+        log(f"Playwrightログイン処理中にOSエラー: {e}")
+        return {}
 
 
 def _apply_cookies_to_instaloader(L, cookies: dict[str, str], session_dir: str) -> str | None:
@@ -383,7 +401,7 @@ def download_media(L, target_username: str, output_dir: str):
                 sys.exit(3)
 
             except Exception as e:
-                log(f"投稿 {post.shortcode} のDL中にエラー: {e}")
+                log_error(f"投稿 {post.shortcode} のDL中にエラー: {type(e).__name__}: {e}")
                 failed += 1
                 time.sleep(2)
 
@@ -442,7 +460,10 @@ def download_single_post(L, shortcode: str, output_dir: str):
     except instaloader.exceptions.LoginRequiredException:
         log("ログインが必要なのだ。セッションが切れている可能性があるのだ。")
         sys.exit(3)
-    except Exception as e:
+    except instaloader.exceptions.ConnectionException as e:
+        log(f"投稿の取得中に接続エラー: {e}")
+        sys.exit(1)
+    except instaloader.exceptions.InstaloaderException as e:
         log(f"投稿の取得に失敗したのだ: {e}")
         sys.exit(1)
 
@@ -460,7 +481,13 @@ def download_single_post(L, shortcode: str, output_dir: str):
             log("投稿のダウンロードに成功したのだ！")
         else:
             log("投稿のダウンロードをスキップしたのだ（既にダウンロード済み）。")
-    except Exception as e:
+    except instaloader.exceptions.LoginRequiredException:
+        log("ダウンロード中にログインが必要になったのだ。")
+        sys.exit(3)
+    except instaloader.exceptions.ConnectionException as e:
+        log(f"投稿のダウンロード中に接続エラー: {e}")
+        sys.exit(1)
+    except instaloader.exceptions.InstaloaderException as e:
         log(f"投稿のダウンロード中にエラー: {e}")
         sys.exit(1)
 
@@ -528,8 +555,9 @@ def main():
     except SystemExit:
         raise
     except Exception as e:
-        log(f"致命的エラー: {e}")
-        traceback.print_exc()
+        log_error(f"致命的エラー: {type(e).__name__}: {e}")
+        traceback.print_exc(file=sys.stderr)
+        sys.stderr.flush()
         sys.exit(1)
 
 

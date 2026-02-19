@@ -52,19 +52,20 @@ public sealed class ClaudeCodeProcessHost
         var stdoutTask = process.StandardOutput.ReadToEndAsync(timeoutCts.Token);
         var stderrTask = process.StandardError.ReadToEndAsync(timeoutCts.Token);
 
+        string stdout;
+        string stderr;
         try
         {
-            await Task.WhenAll(stdoutTask, stderrTask);
             await process.WaitForExitAsync(timeoutCts.Token);
+            await Task.WhenAll(stdoutTask, stderrTask);
+            stdout = await stdoutTask;
+            stderr = await stderrTask;
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested)
         {
             try { process.Kill(entireProcessTree: true); } catch { }
             throw new TimeoutException($"Claude CLI が {TimeoutMs / 1000} 秒以内に応答しませんでした。");
         }
-
-        var stdout = stdoutTask.Result;
-        var stderr = stderrTask.Result;
 
         if (process.ExitCode != 0)
         {
