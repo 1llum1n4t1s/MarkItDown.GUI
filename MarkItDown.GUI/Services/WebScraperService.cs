@@ -941,7 +941,7 @@ public sealed class WebScraperService : IDisposable
     //  Reddit サブレディット（コミュニティ一覧）スクレイパー
     // ════════════════════════════════════════════
 
-    private const int RedditMaxPosts = 100;  // 親投稿の最大取得件数
+    private const int RedditMaxPosts = 200;  // 親投稿の最大取得件数
     private const int RedditListingLimit = 100;  // Reddit API の1リクエストあたり最大件数
     private const int RedditCommentsConcurrency = 5; // コメント取得の並列数
     private const int RedditApiDelayMs = 700; // レート制限対策（1秒2リクエスト制限）
