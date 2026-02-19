@@ -6,7 +6,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
-    <Version>1.0.58</Version>
+    <Version>1.0.62</Version>
     <Authors>ゆろち</Authors>
     <Title>MarkItDown.GUI</Title>
     <ApplicationIcon>..\icon\app.ico</ApplicationIcon>
@@ -36,7 +36,7 @@
   </ItemGroup>
 
   <!-- ビルド前にアイコンを生成 -->
-  <Target Name="GenerateIcon" BeforeTargets="BeforeBuild">
+  <Target Name="GenerateIcon" BeforeTargets="BeforeBuild">  
     <Message Text="アイコン生成スクリプトを実行中..." Importance="high" />
     <Exec Command="pwsh -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\icon\generate_icon.ps1&quot;" ContinueOnError="true" IgnoreExitCode="false" WorkingDirectory="$(MSBuildProjectDirectory)\..\icon" />
   </Target>

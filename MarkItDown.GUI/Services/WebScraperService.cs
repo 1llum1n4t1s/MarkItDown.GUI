@@ -92,7 +92,7 @@ public sealed class WebScraperService : IDisposable
         }
         else if (siteType == SiteType.RedditSubreddit)
         {
-            // Reddit コミュニティ一覧: 投稿+コメントを最大1万件取得
+            // Reddit コミュニティ一覧: Hot投稿(最大100件)+全コメントを取得
             _statusCallback?.Invoke("Reddit コミュニティからデータを取得中...");
             var result = await ScrapeRedditSubredditAsync(url, ct).ConfigureAwait(false);
             var json = JsonSerializer.Serialize(result, AppJsonIndentedContext.Default.RedditSubredditData);
@@ -941,7 +941,7 @@ public sealed class WebScraperService : IDisposable
     //  Reddit サブレディット（コミュニティ一覧）スクレイパー
     // ════════════════════════════════════════════
 
-    private const int RedditMaxItems = 10_000;
+    private const int RedditMaxPosts = 100;  // 親投稿の最大取得件数
     private const int RedditListingLimit = 100;  // Reddit API の1リクエストあたり最大件数
     private const int RedditCommentsConcurrency = 5; // コメント取得の並列数
     private const int RedditApiDelayMs = 700; // レート制限対策（1秒2リクエスト制限）
@@ -959,16 +959,15 @@ public sealed class WebScraperService : IDisposable
         var subreddit = subredditMatch.Groups[1].Value;
         _logMessage($"サブレディット r/{subreddit} の投稿一覧を取得するのだ");
 
-        // ── フェーズ1: 投稿一覧をページネーションで取得 ──
+        // ── フェーズ1: 投稿一覧をページネーションで取得（Hot固定、最大100件） ──
         var allPosts = new List<RedditPost>();
         string? after = null;
-        var totalItems = 0;
 
-        while (totalItems < RedditMaxItems)
+        while (allPosts.Count < RedditMaxPosts)
         {
             ct.ThrowIfCancellationRequested();
 
-            var listingUrl = $"https://www.reddit.com/r/{subreddit}.json?limit={RedditListingLimit}&raw_json=1";
+            var listingUrl = $"https://www.reddit.com/r/{subreddit}/hot.json?limit={RedditListingLimit}&raw_json=1";
             if (!string.IsNullOrEmpty(after))
                 listingUrl += $"&after={after}";
 
@@ -1006,7 +1005,7 @@ public sealed class WebScraperService : IDisposable
             var batchCount = 0;
             foreach (var child in children.EnumerateArray())
             {
-                if (totalItems >= RedditMaxItems) break;
+                if (allPosts.Count >= RedditMaxPosts) break;
 
                 var kind = Str(child, "kind") ?? "";
                 if (kind != "t3") continue; // t3 = リンク（投稿）
@@ -1028,7 +1027,6 @@ public sealed class WebScraperService : IDisposable
                     LinkFlairText = Str(d, "link_flair_text"),
                     Domain = Str(d, "domain")
                 });
-                totalItems++;
                 batchCount++;
             }
 
@@ -1047,7 +1045,7 @@ public sealed class WebScraperService : IDisposable
 
         _logMessage($"投稿一覧の取得完了なのだ: 合計 {allPosts.Count} 件");
 
-        // ── フェーズ2: 各投稿のコメントを取得 ──
+        // ── フェーズ2: 各投稿のコメントを全取得 ──
         var threads = new List<RedditThreadData>();
         var totalComments = 0;
         var processedPosts = 0;
@@ -1059,7 +1057,6 @@ public sealed class WebScraperService : IDisposable
 
         foreach (var post in allPosts)
         {
-            if (totalComments >= RedditMaxItems) break;
             ct.ThrowIfCancellationRequested();
 
             await semaphore.WaitAsync(ct).ConfigureAwait(false);
