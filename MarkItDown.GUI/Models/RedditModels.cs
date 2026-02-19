@@ -70,6 +70,30 @@ public class RedditPost
 }
 
 /// <summary>
+/// Reddit サブレディット（コミュニティ）全体のデータモデル（複数投稿 + 各投稿のコメント）
+/// </summary>
+public class RedditSubredditData
+{
+    [JsonPropertyName("url")]
+    public string Url { get; set; } = "";
+
+    [JsonPropertyName("subreddit")]
+    public string Subreddit { get; set; } = "";
+
+    [JsonPropertyName("total_posts")]
+    public int TotalPosts { get; set; }
+
+    [JsonPropertyName("total_comments")]
+    public int TotalComments { get; set; }
+
+    [JsonPropertyName("threads")]
+    public List<RedditThreadData> Threads { get; set; } = [];
+
+    [JsonPropertyName("scraped_at")]
+    public string ScrapedAt { get; set; } = "";
+}
+
+/// <summary>
 /// Reddit コメントのデータモデル（再帰的な返信を含む）
 /// </summary>
 public class RedditComment

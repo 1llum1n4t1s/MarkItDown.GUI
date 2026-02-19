@@ -13,6 +13,7 @@ namespace MarkItDown.GUI.Models;
 [JsonSerializable(typeof(string[]))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(RedditThreadData))]
+[JsonSerializable(typeof(RedditSubredditData))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 [JsonSerializable(typeof(Dictionary<string, JsonElement>))]
 [JsonSerializable(typeof(List<JsonElement>))]
@@ -25,6 +26,7 @@ public partial class AppJsonContext : JsonSerializerContext;
     WriteIndented = true,
     DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
 [JsonSerializable(typeof(RedditThreadData))]
+[JsonSerializable(typeof(RedditSubredditData))]
 [JsonSerializable(typeof(JsonElement))]
 [JsonSerializable(typeof(Dictionary<string, object>))]
 [JsonSerializable(typeof(Dictionary<string, JsonElement>))]

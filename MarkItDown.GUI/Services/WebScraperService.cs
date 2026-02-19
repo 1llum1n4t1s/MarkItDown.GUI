@@ -90,6 +90,15 @@ public sealed class WebScraperService : IDisposable
             await File.WriteAllTextAsync(outputPath, json, System.Text.Encoding.UTF8, ct).ConfigureAwait(false);
             _logMessage($"JSONファイルを出力したのだ: {outputPath}");
         }
+        else if (siteType == SiteType.RedditSubreddit)
+        {
+            // Reddit コミュニティ一覧: 投稿+コメントを最大1万件取得
+            _statusCallback?.Invoke("Reddit コミュニティからデータを取得中...");
+            var result = await ScrapeRedditSubredditAsync(url, ct).ConfigureAwait(false);
+            var json = JsonSerializer.Serialize(result, AppJsonIndentedContext.Default.RedditSubredditData);
+            await File.WriteAllTextAsync(outputPath, json, System.Text.Encoding.UTF8, ct).ConfigureAwait(false);
+            _logMessage($"JSONファイルを出力したのだ: {outputPath}");
+        }
         else if (siteType == SiteType.XTwitter)
         {
             // X/Twitter はPlaywright専用スクリプトで処理
@@ -183,18 +192,26 @@ public sealed class WebScraperService : IDisposable
                 .Replace("www.", "")
                 .Replace(".", "_");
 
-            // Reddit
-            var redditMatch = Regex.Match(uri.AbsolutePath,
+            // Reddit スレッド
+            var redditThreadMatch = Regex.Match(uri.AbsolutePath,
                 @"/r/([^/]+)/comments/([^/]+)(?:/([^/]*))?", RegexOptions.IgnoreCase);
-            if (redditMatch.Success)
+            if (redditThreadMatch.Success)
             {
-                var sub = redditMatch.Groups[1].Value;
-                var id = redditMatch.Groups[2].Value;
-                var slug = redditMatch.Groups[3].Success ? redditMatch.Groups[3].Value : "";
+                var sub = redditThreadMatch.Groups[1].Value;
+                var id = redditThreadMatch.Groups[2].Value;
+                var slug = redditThreadMatch.Groups[3].Success ? redditThreadMatch.Groups[3].Value : "";
                 var name = string.IsNullOrEmpty(slug)
                     ? $"reddit_{sub}_{id}"
                     : $"reddit_{sub}_{id}_{slug}";
                 return Sanitize(name) + ".json";
+            }
+
+            // Reddit サブレディット（コミュニティTOP）
+            var redditSubMatch = Regex.Match(uri.AbsolutePath,
+                @"^/r/([^/]+)/?", RegexOptions.IgnoreCase);
+            if (redditSubMatch.Success && IsRedditHost(uri.Host.ToLowerInvariant()))
+            {
+                return Sanitize($"reddit_{redditSubMatch.Groups[1].Value}") + ".json";
             }
 
             // Instagram — /username
@@ -656,7 +673,7 @@ public sealed class WebScraperService : IDisposable
     //  サイト種別判定
     // ────────────────────────────────────────────
 
-    private enum SiteType { Reddit, XTwitter, Instagram, Generic }
+    private enum SiteType { Reddit, RedditSubreddit, XTwitter, Instagram, Generic }
 
     private static SiteType DetectSiteType(string url)
     {
@@ -664,7 +681,14 @@ public sealed class WebScraperService : IDisposable
         {
             var host = uri.Host.ToLowerInvariant();
             if (IsRedditHost(host))
+            {
+                // /r/{sub}/comments/ パターンなら個別スレッド、それ以外はサブレディット一覧
+                if (Regex.IsMatch(uri.AbsolutePath, @"/r/[^/]+/comments/", RegexOptions.IgnoreCase))
+                    return SiteType.Reddit;
+                if (Regex.IsMatch(uri.AbsolutePath, @"^/r/[^/]+/?", RegexOptions.IgnoreCase))
+                    return SiteType.RedditSubreddit;
                 return SiteType.Reddit;
+            }
             if (IsXTwitterHost(host) && IsXTwitterUserUrl(uri))
                 return SiteType.XTwitter;
             if (IsInstagramHost(host) && IsInstagramUrl(uri))
@@ -914,7 +938,248 @@ public sealed class WebScraperService : IDisposable
     }
 
     // ════════════════════════════════════════════
-    //  Reddit スクレイパー
+    //  Reddit サブレディット（コミュニティ一覧）スクレイパー
+    // ════════════════════════════════════════════
+
+    private const int RedditMaxItems = 10_000;
+    private const int RedditListingLimit = 100;  // Reddit API の1リクエストあたり最大件数
+    private const int RedditCommentsConcurrency = 5; // コメント取得の並列数
+    private const int RedditApiDelayMs = 700; // レート制限対策（1秒2リクエスト制限）
+
+    /// <summary>
+    /// サブレディットの投稿一覧を取得し、各投稿のコメントも取得する（最大1万件）
+    /// </summary>
+    private async Task<RedditSubredditData> ScrapeRedditSubredditAsync(string url, CancellationToken ct)
+    {
+        var uri = new Uri(url);
+        var subredditMatch = Regex.Match(uri.AbsolutePath, @"/r/([^/]+)", RegexOptions.IgnoreCase);
+        if (!subredditMatch.Success)
+            throw new ArgumentException($"サブレディットのURLパターンに一致しません: {url}");
+
+        var subreddit = subredditMatch.Groups[1].Value;
+        _logMessage($"サブレディット r/{subreddit} の投稿一覧を取得するのだ");
+
+        // ── フェーズ1: 投稿一覧をページネーションで取得 ──
+        var allPosts = new List<RedditPost>();
+        string? after = null;
+        var totalItems = 0;
+
+        while (totalItems < RedditMaxItems)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            var listingUrl = $"https://www.reddit.com/r/{subreddit}.json?limit={RedditListingLimit}&raw_json=1";
+            if (!string.IsNullOrEmpty(after))
+                listingUrl += $"&after={after}";
+
+            _statusCallback?.Invoke($"投稿一覧を取得中... ({allPosts.Count} 件取得済み)");
+            _logMessage($"投稿一覧APIにアクセス中なのだ: {listingUrl}");
+
+            using var request = new HttpRequestMessage(HttpMethod.Get, listingUrl);
+            request.Headers.Accept.ParseAdd("application/json");
+
+            using var response = await _httpClient.SendAsync(request, ct).ConfigureAwait(false);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+            {
+                _logMessage("レート制限に到達したのだ。10秒待機するのだ...");
+                await Task.Delay(10_000, ct).ConfigureAwait(false);
+                continue;
+            }
+            response.EnsureSuccessStatusCode();
+
+            var body = await response.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+            var root = JsonSerializer.Deserialize(body, AppJsonContext.Default.JsonElement);
+
+            if (root.ValueKind != JsonValueKind.Object)
+            {
+                _logMessage("予期しないレスポンス形式なのだ。取得を終了するのだ。");
+                break;
+            }
+
+            if (!root.TryGetProperty("data", out var data))
+                break;
+
+            if (!data.TryGetProperty("children", out var children))
+                break;
+
+            var batchCount = 0;
+            foreach (var child in children.EnumerateArray())
+            {
+                if (totalItems >= RedditMaxItems) break;
+
+                var kind = Str(child, "kind") ?? "";
+                if (kind != "t3") continue; // t3 = リンク（投稿）
+                if (!child.TryGetProperty("data", out var d)) continue;
+
+                allPosts.Add(new RedditPost
+                {
+                    Title = Str(d, "title") ?? "",
+                    Author = Str(d, "author") ?? "[deleted]",
+                    Subreddit = Str(d, "subreddit") ?? subreddit,
+                    Score = Int(d, "score") ?? 0,
+                    UpvoteRatio = Dbl(d, "upvote_ratio"),
+                    CreatedUtc = Dbl(d, "created_utc"),
+                    SelfText = Str(d, "selftext") ?? "",
+                    Url = Str(d, "url") ?? "",
+                    Permalink = Str(d, "permalink") ?? "",
+                    NumComments = Int(d, "num_comments") ?? 0,
+                    IsVideo = Bool(d, "is_video"),
+                    LinkFlairText = Str(d, "link_flair_text"),
+                    Domain = Str(d, "domain")
+                });
+                totalItems++;
+                batchCount++;
+            }
+
+            _logMessage($"投稿 {batchCount} 件を取得したのだ (合計: {allPosts.Count} 件)");
+
+            // 次ページの after トークンを取得
+            after = Str(data, "after");
+            if (string.IsNullOrEmpty(after))
+            {
+                _logMessage("全投稿を取得完了したのだ");
+                break;
+            }
+
+            await Task.Delay(RedditApiDelayMs, ct).ConfigureAwait(false);
+        }
+
+        _logMessage($"投稿一覧の取得完了なのだ: 合計 {allPosts.Count} 件");
+
+        // ── フェーズ2: 各投稿のコメントを取得 ──
+        var threads = new List<RedditThreadData>();
+        var totalComments = 0;
+        var processedPosts = 0;
+
+        // 並列処理用のセマフォ
+        using var semaphore = new SemaphoreSlim(RedditCommentsConcurrency);
+        var tasks = new List<Task>();
+        var lockObj = new object();
+
+        foreach (var post in allPosts)
+        {
+            if (totalComments >= RedditMaxItems) break;
+            ct.ThrowIfCancellationRequested();
+
+            await semaphore.WaitAsync(ct).ConfigureAwait(false);
+
+            var capturedPost = post;
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    var comments = new List<RedditComment>();
+                    var permalink = capturedPost.Permalink;
+
+                    if (!string.IsNullOrEmpty(permalink))
+                    {
+                        try
+                        {
+                            var threadJsonUrl = $"https://www.reddit.com{permalink.TrimEnd('/')}.json?raw_json=1";
+
+                            using var req = new HttpRequestMessage(HttpMethod.Get, threadJsonUrl);
+                            req.Headers.Accept.ParseAdd("application/json");
+
+                            using var resp = await _httpClient.SendAsync(req, ct).ConfigureAwait(false);
+
+                            if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                            {
+                                _logMessage($"コメント取得中にレート制限: {capturedPost.Title}");
+                                await Task.Delay(10_000, ct).ConfigureAwait(false);
+                                // リトライ
+                                using var retryReq = new HttpRequestMessage(HttpMethod.Get, threadJsonUrl);
+                                retryReq.Headers.Accept.ParseAdd("application/json");
+                                using var retryResp = await _httpClient.SendAsync(retryReq, ct).ConfigureAwait(false);
+                                if (retryResp.IsSuccessStatusCode)
+                                {
+                                    var retryBody = await retryResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                                    comments = ParseCommentsFromThreadJson(retryBody);
+                                }
+                            }
+                            else if (resp.IsSuccessStatusCode)
+                            {
+                                var threadBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                                comments = ParseCommentsFromThreadJson(threadBody);
+                            }
+
+                            await Task.Delay(RedditApiDelayMs, ct).ConfigureAwait(false);
+                        }
+                        catch (Exception ex) when (ex is not OperationCanceledException)
+                        {
+                            _logMessage($"コメント取得失敗 (スキップ): {capturedPost.Title} - {ex.Message}");
+                        }
+                    }
+
+                    var commentCount = CountComments(comments);
+                    lock (lockObj)
+                    {
+                        threads.Add(new RedditThreadData
+                        {
+                            Url = !string.IsNullOrEmpty(capturedPost.Permalink)
+                                ? $"https://www.reddit.com{capturedPost.Permalink}"
+                                : capturedPost.Url,
+                            Subreddit = capturedPost.Subreddit,
+                            Post = capturedPost,
+                            Comments = comments,
+                            ScrapedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+                        });
+
+                        totalComments += commentCount;
+                        processedPosts++;
+                    }
+
+                    if (processedPosts % 10 == 0 || processedPosts == allPosts.Count)
+                    {
+                        _statusCallback?.Invoke($"コメント取得中... ({processedPosts}/{allPosts.Count} 投稿, {totalComments} コメント)");
+                        _logMessage($"コメント取得進捗: {processedPosts}/{allPosts.Count} 投稿, {totalComments} コメント");
+                    }
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            }, ct));
+        }
+
+        await Task.WhenAll(tasks).ConfigureAwait(false);
+
+        // permalink 順にソート（時系列に近い順序を保持）
+        threads.Sort((a, b) => string.Compare(a.Post.Permalink, b.Post.Permalink, StringComparison.Ordinal));
+
+        _logMessage($"コミュニティ取得完了なのだ: {threads.Count} 投稿, {totalComments} コメント");
+
+        return new RedditSubredditData
+        {
+            Url = url,
+            Subreddit = subreddit,
+            TotalPosts = threads.Count,
+            TotalComments = totalComments,
+            Threads = threads,
+            ScrapedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+        };
+    }
+
+    /// <summary>
+    /// スレッドJSON（配列[投稿, コメント]）からコメント一覧をパースする
+    /// </summary>
+    private List<RedditComment> ParseCommentsFromThreadJson(string json)
+    {
+        try
+        {
+            var root = JsonSerializer.Deserialize(json, AppJsonContext.Default.JsonElement);
+            if (root.ValueKind == JsonValueKind.Array && root.GetArrayLength() >= 2)
+                return ExtractRedditComments(root[1]);
+        }
+        catch
+        {
+            // パース失敗時は空リストを返す
+        }
+        return [];
+    }
+
+    // ════════════════════════════════════════════
+    //  Reddit スレッド（個別投稿）スクレイパー
     // ════════════════════════════════════════════
 
     private async Task<RedditThreadData> ScrapeRedditAsync(string url, CancellationToken ct)
