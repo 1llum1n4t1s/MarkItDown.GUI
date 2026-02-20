@@ -943,11 +943,11 @@ public sealed class WebScraperService : IDisposable
 
     private const int RedditMaxPosts = 200;  // 親投稿の最大取得件数
     private const int RedditListingLimit = 100;  // Reddit API の1リクエストあたり最大件数
-    private const int RedditCommentsConcurrency = 5; // コメント取得の並列数
-    private const int RedditApiDelayMs = 700; // レート制限対策（1秒2リクエスト制限）
+    private const int RedditApiDelayMs = 2000; // リクエスト間ディレイ（ms）— 非認証APIは厳しい制限があるため余裕を持つ
+    private const int RedditMaxRetries = 5; // レート制限時の最大リトライ回数
 
     /// <summary>
-    /// サブレディットの投稿一覧を取得し、各投稿のコメントも取得する（最大1万件）
+    /// サブレディットのHot投稿一覧（最大200件）を取得し、各投稿のコメントを全取得する
     /// </summary>
     private async Task<RedditSubredditData> ScrapeRedditSubredditAsync(string url, CancellationToken ct)
     {
@@ -1045,101 +1045,106 @@ public sealed class WebScraperService : IDisposable
 
         _logMessage($"投稿一覧の取得完了なのだ: 合計 {allPosts.Count} 件");
 
-        // ── フェーズ2: 各投稿のコメントを全取得 ──
+        // ── フェーズ2: 各投稿のコメントをシーケンシャルに取得 ──
+        // Reddit 非認証 API はレート制限が厳しい (~10 req/min) ため、
+        // 並列ではなく1件ずつ取得し、適応的にディレイを調整する
         var threads = new List<RedditThreadData>();
         var totalComments = 0;
         var processedPosts = 0;
-
-        // 並列処理用のセマフォ
-        using var semaphore = new SemaphoreSlim(RedditCommentsConcurrency);
-        var tasks = new List<Task>();
-        var lockObj = new object();
+        var currentDelayMs = RedditApiDelayMs; // 適応的ディレイ（レート制限を受けたら増加）
+        var consecutiveRateLimits = 0; // 連続レート制限回数
 
         foreach (var post in allPosts)
         {
             ct.ThrowIfCancellationRequested();
 
-            await semaphore.WaitAsync(ct).ConfigureAwait(false);
+            var comments = new List<RedditComment>();
+            var permalink = post.Permalink;
 
-            var capturedPost = post;
-            tasks.Add(Task.Run(async () =>
+            if (!string.IsNullOrEmpty(permalink))
             {
                 try
                 {
-                    var comments = new List<RedditComment>();
-                    var permalink = capturedPost.Permalink;
+                    var threadJsonUrl = $"https://www.reddit.com{permalink.TrimEnd('/')}.json?raw_json=1";
 
-                    if (!string.IsNullOrEmpty(permalink))
+                    for (var attempt = 0; attempt <= RedditMaxRetries; attempt++)
                     {
-                        try
+                        using var req = new HttpRequestMessage(HttpMethod.Get, threadJsonUrl);
+                        req.Headers.Accept.ParseAdd("application/json");
+
+                        using var resp = await _httpClient.SendAsync(req, ct).ConfigureAwait(false);
+
+                        if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
                         {
-                            var threadJsonUrl = $"https://www.reddit.com{permalink.TrimEnd('/')}.json?raw_json=1";
+                            consecutiveRateLimits++;
 
-                            using var req = new HttpRequestMessage(HttpMethod.Get, threadJsonUrl);
-                            req.Headers.Accept.ParseAdd("application/json");
-
-                            using var resp = await _httpClient.SendAsync(req, ct).ConfigureAwait(false);
-
-                            if (resp.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+                            if (attempt == RedditMaxRetries)
                             {
-                                _logMessage($"コメント取得中にレート制限: {capturedPost.Title}");
-                                await Task.Delay(10_000, ct).ConfigureAwait(false);
-                                // リトライ
-                                using var retryReq = new HttpRequestMessage(HttpMethod.Get, threadJsonUrl);
-                                retryReq.Headers.Accept.ParseAdd("application/json");
-                                using var retryResp = await _httpClient.SendAsync(retryReq, ct).ConfigureAwait(false);
-                                if (retryResp.IsSuccessStatusCode)
-                                {
-                                    var retryBody = await retryResp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                                    comments = ParseCommentsFromThreadJson(retryBody);
-                                }
-                            }
-                            else if (resp.IsSuccessStatusCode)
-                            {
-                                var threadBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
-                                comments = ParseCommentsFromThreadJson(threadBody);
+                                _logMessage($"コメント取得断念 (リトライ上限): {post.Title}");
+                                break;
                             }
 
-                            await Task.Delay(RedditApiDelayMs, ct).ConfigureAwait(false);
+                            // Retry-After ヘッダがあれば尊重、なければ指数バックオフ
+                            var backoffMs = 10_000 * (1 << attempt); // 10s, 20s, 40s, 80s, 160s
+                            if (resp.Headers.RetryAfter?.Delta is { } retryDelta)
+                            {
+                                backoffMs = Math.Max(backoffMs, (int)retryDelta.TotalMilliseconds + 1000);
+                            }
+
+                            _logMessage($"レート制限 (リトライ {attempt + 1}/{RedditMaxRetries}, {backoffMs / 1000}秒待機): {post.Title}");
+                            await Task.Delay(backoffMs, ct).ConfigureAwait(false);
+
+                            // レート制限を連続で受けたら、通常ディレイも増加させる（最大10秒）
+                            if (consecutiveRateLimits >= 2)
+                            {
+                                currentDelayMs = Math.Min(currentDelayMs + 1000, 10_000);
+                                _logMessage($"リクエスト間隔を {currentDelayMs}ms に増加したのだ");
+                            }
+
+                            continue;
                         }
-                        catch (Exception ex) when (ex is not OperationCanceledException)
+
+                        // 成功した場合、連続レート制限カウンタをリセット
+                        consecutiveRateLimits = 0;
+
+                        if (resp.IsSuccessStatusCode)
                         {
-                            _logMessage($"コメント取得失敗 (スキップ): {capturedPost.Title} - {ex.Message}");
+                            var threadBody = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
+                            comments = ParseCommentsFromThreadJson(threadBody);
                         }
+                        break;
                     }
 
-                    var commentCount = CountComments(comments);
-                    lock (lockObj)
-                    {
-                        threads.Add(new RedditThreadData
-                        {
-                            Url = !string.IsNullOrEmpty(capturedPost.Permalink)
-                                ? $"https://www.reddit.com{capturedPost.Permalink}"
-                                : capturedPost.Url,
-                            Subreddit = capturedPost.Subreddit,
-                            Post = capturedPost,
-                            Comments = comments,
-                            ScrapedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
-                        });
-
-                        totalComments += commentCount;
-                        processedPosts++;
-                    }
-
-                    if (processedPosts % 10 == 0 || processedPosts == allPosts.Count)
-                    {
-                        _statusCallback?.Invoke($"コメント取得中... ({processedPosts}/{allPosts.Count} 投稿, {totalComments} コメント)");
-                        _logMessage($"コメント取得進捗: {processedPosts}/{allPosts.Count} 投稿, {totalComments} コメント");
-                    }
+                    // 次のリクエストまでディレイ
+                    await Task.Delay(currentDelayMs, ct).ConfigureAwait(false);
                 }
-                finally
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    semaphore.Release();
+                    _logMessage($"コメント取得失敗 (スキップ): {post.Title} - {ex.Message}");
                 }
-            }, ct));
-        }
+            }
 
-        await Task.WhenAll(tasks).ConfigureAwait(false);
+            var commentCount = CountComments(comments);
+            threads.Add(new RedditThreadData
+            {
+                Url = !string.IsNullOrEmpty(post.Permalink)
+                    ? $"https://www.reddit.com{post.Permalink}"
+                    : post.Url,
+                Subreddit = post.Subreddit,
+                Post = post,
+                Comments = comments,
+                ScrapedAt = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ")
+            });
+
+            totalComments += commentCount;
+            processedPosts++;
+
+            if (processedPosts % 10 == 0 || processedPosts == allPosts.Count)
+            {
+                _statusCallback?.Invoke($"コメント取得中... ({processedPosts}/{allPosts.Count} 投稿, {totalComments} コメント)");
+                _logMessage($"コメント取得進捗: {processedPosts}/{allPosts.Count} 投稿, {totalComments} コメント");
+            }
+        }
 
         // permalink 順にソート（時系列に近い順序を保持）
         threads.Sort((a, b) => string.Compare(a.Post.Permalink, b.Post.Permalink, StringComparison.Ordinal));
