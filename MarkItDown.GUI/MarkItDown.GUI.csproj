@@ -6,7 +6,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
-    <Version>1.0.70</Version>
+    <Version>1.0.72</Version>
     <Authors>ゆろち</Authors>
     <Title>MarkItDown.GUI</Title>
     <ApplicationIcon>..\icon\app.ico</ApplicationIcon>
@@ -18,14 +18,16 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="ActiproSoftware.Controls.Avalonia" Version="25.2.2" />
-    <PackageReference Include="Avalonia" Version="11.3.12" />
-    <PackageReference Include="Avalonia.Desktop" Version="11.3.12" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.12" />
-    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.42" />
-    <PackageReference Include="7z.Libs" Version="25.1.0" />
+    <PackageReference Include="LlmChamber.Avalonia" Version="1.0.0" />
+    <PackageReference Include="ActiproSoftware.Controls.Avalonia" Version="26.1.0-rc.1" />
+    <PackageReference Include="Avalonia" Version="12.0.0" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.0" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.0" />
+    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.48" />
+    <PackageReference Include="7z.Libs" Version="26.0.0" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.92.0" />
     <PackageReference Include="Velopack" Version="0.0.*" />
-    <PackageReference Include="NLog" Version="6.1.0" />
+    <PackageReference Include="NLog" Version="6.1.2" />
   </ItemGroup>
 
   <!-- Scriptsフォルダを出力ディレクトリにコピー -->

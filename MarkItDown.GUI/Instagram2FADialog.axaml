@@ -19,7 +19,7 @@
                            FontSize="12"
                            Foreground="#999999"/>
                 <TextBox x:Name="CodeInput"
-                         Watermark="6桁のコード"
+                         PlaceholderText="6桁のコード"
                          FontSize="16"
                          MaxLength="8"/>
             </StackPanel>

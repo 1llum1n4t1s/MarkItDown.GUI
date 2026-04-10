@@ -198,73 +198,6 @@ public class AppSettings
     }
 
     /// <summary>
-    /// Claude AI を使用するかどうかを取得する
-    /// </summary>
-    public static bool GetUseClaudeAI()
-    {
-        lock (_lock)
-        {
-            try
-            {
-                var value = _settingsDocument?.Root?.Element("UseClaudeAI")?.Value;
-                return bool.TryParse(value, out var result) && result;
-            }
-            catch (InvalidOperationException)
-            {
-                return false;
-            }
-            catch (XmlException)
-            {
-                return false;
-            }
-        }
-    }
-
-    /// <summary>
-    /// Claude AI を使用するかどうかを保存する
-    /// </summary>
-    /// <param name="useClaudeAI">Claude AI を使用するかどうか</param>
-    public static void SetUseClaudeAI(bool useClaudeAI)
-    {
-        lock (_lock)
-        {
-            try
-            {
-                var root = _settingsDocument?.Root;
-                if (root is null)
-                {
-                    return;
-                }
-
-                var element = root.Element("UseClaudeAI");
-                if (element is null)
-                {
-                    root.Add(new XElement("UseClaudeAI", useClaudeAI.ToString().ToLowerInvariant()));
-                }
-                else
-                {
-                    element.Value = useClaudeAI.ToString().ToLowerInvariant();
-                }
-
-                EnsureSettingsDirectory();
-                _settingsDocument?.Save(SettingsPath);
-            }
-            catch (IOException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to save UseClaudeAI: {ex.Message}");
-            }
-            catch (UnauthorizedAccessException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to save UseClaudeAI: {ex.Message}");
-            }
-            catch (XmlException ex)
-            {
-                System.Diagnostics.Debug.WriteLine($"Failed to save UseClaudeAI: {ex.Message}");
-            }
-        }
-    }
-
-    /// <summary>
     /// Create default settings file
     /// </summary>
     private static void CreateDefaultSettings()
@@ -275,8 +208,7 @@ public class AppSettings
                 new XElement("UpdateRepoOwner", "1llum1n4t1s"),
                 new XElement("UpdateRepoName", "MarkItDown.GUI"),
                 new XElement("UpdateChannel", "release"),
-                new XElement("PythonVersion", ""),
-                new XElement("UseClaudeAI", "false")
+                new XElement("PythonVersion", "")
             );
 
             _settingsDocument = new XDocument(root);

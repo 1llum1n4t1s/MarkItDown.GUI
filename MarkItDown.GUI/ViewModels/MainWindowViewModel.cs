@@ -1,8 +1,11 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Media;
 using Avalonia.Threading;
+using LlmChamber;
 using MarkItDown.GUI.Services;
 
 namespace MarkItDown.GUI.ViewModels;
@@ -16,9 +19,8 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private IBrush _dropZoneBackground;
     private FileProcessor? _fileProcessor;
     private MarkItDownProcessor? _markItDownProcessor;
-    private ClaudeCodeSetupService? _claudeSetupService;
     private WebScraperService? _webScraperService;
-    private bool _isClaudeEnabled;
+    private ILocalLlm? _llm;
     private bool _isProcessing;
     private string _processingTitle = string.Empty;
     private string _processingStatus = string.Empty;
@@ -34,10 +36,10 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private readonly object _progressLock = new();
     private double _pythonProgress;
     private double _ffmpegProgress;
-    private double _claudeProgress;
+    private double _llmProgress;
     private string _pythonStatus = string.Empty;
     private string _ffmpegStatus = string.Empty;
-    private string _claudeStatus = string.Empty;
+    private string _llmStatus = string.Empty;
     // 現在アクティブなダウンロードタスク数（0 なら IsDownloading=false）
     private int _activeDownloadCount;
 
@@ -118,25 +120,6 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Claude AI を使用するかどうか
-    /// </summary>
-    public bool IsClaudeEnabled
-    {
-        get => _isClaudeEnabled;
-        set
-        {
-            if (SetProperty(ref _isClaudeEnabled, value))
-            {
-                AppSettings.SetUseClaudeAI(value);
-                if (value)
-                {
-                    _ = SetupClaudeAsync();
-                }
-            }
-        }
-    }
-
-    /// <summary>
     /// コンストラクタ
     /// </summary>
     public MainWindowViewModel()
@@ -172,8 +155,6 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             // 設定ファイルを最初に読み込み
             AppSettings.LoadSettings();
-            _isClaudeEnabled = AppSettings.GetUseClaudeAI();
-            OnPropertyChanged(nameof(IsClaudeEnabled));
 
             ShowProcessing("MarkItDown.GUI を初期化中...", "Python環境を初期化中...");
 
@@ -222,14 +203,20 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
 
             _webScraperService.SetPlaywrightScraper(playwrightScraper);
 
-            // 保存された設定で Claude が有効な場合、セットアップを実行
-            if (_isClaudeEnabled)
+            // LLMインスタンスを先に生成してサービスに渡す（DLはバックグラウンドで実行）
+            PrepareLlmInstance();
+
+            // ローカルLLM の初期化（DL含む）をバックグラウンドで実行（UIをブロックしない）
+            _ = SetupLlmAsync().ContinueWith(t =>
             {
-                await SetupClaudeAsync();
-            }
+                if (t.IsFaulted && t.Exception is not null)
+                {
+                    LogMessage($"LLMバックグラウンド初期化で未処理エラーなのだ: {t.Exception.InnerException?.Message}", LogLevel.Error);
+                }
+            }, TaskContinuationOptions.OnlyOnFaulted);
 
             UpdateProcessingStatus("初期化完了");
-            LogMessage("すべての初期化が完了したのだ！");
+            LogMessage("すべての初期化が完了したのだ！（LLMはバックグラウンドで準備中）");
         }
         catch (Exception ex)
         {
@@ -244,78 +231,82 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Claude Code CLI のセットアップ・認証を実行する
+    /// LLMインスタンスを生成し、イベント登録とサービスへの設定を行う（同期的・即座に完了）。
+    /// 実際のDL・初期化は SetupLlmAsync で非同期に行う。
     /// </summary>
-    private async Task SetupClaudeAsync()
+    private void PrepareLlmInstance()
     {
         try
         {
-            LogMessage("Claude AI セットアップを開始するのだ...");
-            _claudeSetupService = new ClaudeCodeSetupService(LogMessage, UpdateClaudeDownloadProgress, UpdateClaudeStatus);
-
-            // Node.js のインストール
-            UpdateClaudeStatus("Node.js を準備中...");
-            await _claudeSetupService.EnsureNodeJsAsync();
-
-            if (!_claudeSetupService.IsNodeJsInstalled)
+            // AMD GPU 環境では Vulkan バックエンドを使用する
+            // Full版にはROCm DLLが含まれないため、Vulkan経由でGPUを利用
+            // NVIDIA環境ではCUDA自動検出に任せる
+            if (IsAmdGpuPresent())
             {
-                LogMessage("Node.js のインストールに失敗したのだ。", LogLevel.Error);
+                Environment.SetEnvironmentVariable("OLLAMA_GPU_BACKEND", "vulkan");
+                LogMessage("AMD GPU を検出したのだ。Vulkan バックエンドを使用するのだ。");
+            }
+
+            _llm = LlmChamberFactory.Create(opt =>
+            {
+                opt.DefaultModel = "gemma4-e4b";
+                opt.CacheDirectory = Path.Combine(AppPathHelper.LibDirectory, "ollama");
+                opt.RuntimeVariant = RuntimeVariant.Full;
+            });
+
+            _llm.RuntimeDownloadProgress += (_, e) =>
+            {
+                UpdateLlmDownloadProgress(e.Percentage ?? 0);
+                UpdateLlmStatus("Ollama ランタイムをダウンロード中...");
+            };
+
+            _llm.ModelDownloadProgress += (_, e) =>
+            {
+                UpdateLlmDownloadProgress(e.Percentage ?? 0);
+                UpdateLlmStatus("LLMモデル (Gemma 4 E4B) をダウンロード中...");
+            };
+
+            // まだ IsReady=false だが、インスタンスを先にサービスに渡しておく
+            // サービス側で InitializeAsync を待機して使う
+            _webScraperService?.SetLlm(_llm);
+        }
+        catch (Exception ex)
+        {
+            LogMessage($"LLMインスタンス生成エラーなのだ: {ex.Message}", LogLevel.Error);
+            Logger.LogException("LLMインスタンス生成中にエラーが発生しました", ex);
+        }
+    }
+
+    /// <summary>
+    /// ローカルLLM (Ollama) の初期化をバックグラウンドで実行する（ランタイムDL・モデルpull含む）
+    /// </summary>
+    private async Task SetupLlmAsync()
+    {
+        try
+        {
+            LogMessage("ローカルLLM セットアップを開始するのだ...");
+
+            if (_llm is null)
+            {
+                LogMessage("LLMインスタンスが生成されていないのだ。", LogLevel.Error);
                 return;
             }
 
-            // Claude Code CLI のインストール
-            UpdateClaudeStatus("Claude Code CLI を準備中...");
-            await _claudeSetupService.EnsureCliAsync();
+            await _llm.InitializeAsync(CancellationToken.None).ConfigureAwait(false);
 
-            if (!_claudeSetupService.IsCliInstalled)
+            if (_llm.IsReady)
             {
-                LogMessage("Claude Code CLI のインストールに失敗したのだ。", LogLevel.Error);
-                return;
-            }
-
-            // ログインチェック
-            UpdateClaudeStatus("Claude 認証を確認中...");
-            var isLoggedIn = await _claudeSetupService.IsLoggedInAsync();
-
-            if (!isLoggedIn)
-            {
-                LogMessage("Claude にログインしていないのだ。ログイン画面を起動するのだ...");
-                await _claudeSetupService.RunLoginAsync();
-                isLoggedIn = await _claudeSetupService.IsLoggedInAsync();
-            }
-
-            if (isLoggedIn)
-            {
-                // 接続検証
-                UpdateClaudeStatus("Claude 接続を検証中...");
-                var isConnected = await _claudeSetupService.VerifyConnectivityAsync();
-
-                if (isConnected)
-                {
-                    var nodePath = _claudeSetupService.GetNodePath();
-                    var cliJsPath = _claudeSetupService.GetCliJsPath();
-
-                    // WebScraperService、PlaywrightScraperService、MarkItDownProcessor に Claude 設定を渡す
-                    _webScraperService?.SetClaudeConfig(nodePath, cliJsPath);
-                    _webScraperService?.GetPlaywrightScraper()?.SetClaudeConfig(nodePath, cliJsPath);
-                    _markItDownProcessor?.SetClaudeConfig(nodePath, cliJsPath);
-
-                    LogMessage("Claude AI セットアップ完了なのだ！");
-                }
-                else
-                {
-                    LogMessage("Claude 接続検証に失敗したのだ。AI機能なしで動作するのだ。", LogLevel.Warning);
-                }
+                LogMessage("ローカルLLM セットアップ完了なのだ！");
             }
             else
             {
-                LogMessage("Claude ログインがキャンセルされたのだ。AI機能なしで動作するのだ。", LogLevel.Warning);
+                LogMessage("ローカルLLM の初期化に失敗したのだ。LLM機能なしで動作するのだ。", LogLevel.Warning);
             }
         }
         catch (Exception ex)
         {
-            LogMessage($"Claude セットアップ中にエラーなのだ: {ex.Message}", LogLevel.Error);
-            Logger.LogException("Claude セットアップ中にエラーが発生しました", ex);
+            LogMessage($"ローカルLLM セットアップ中にエラーなのだ: {ex.Message}", LogLevel.Error);
+            Logger.LogException("ローカルLLM セットアップ中にエラーが発生しました", ex);
         }
     }
 
@@ -679,27 +670,27 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Claudeダウンロード進捗を更新する（プログレスバーのみ担当）
+    /// LLMダウンロード進捗を更新する（プログレスバーのみ担当）
     /// </summary>
     /// <param name="progress">進捗率（0～100）</param>
-    private void UpdateClaudeDownloadProgress(double progress)
+    private void UpdateLlmDownloadProgress(double progress)
     {
         lock (_progressLock)
         {
-            _claudeProgress = progress;
+            _llmProgress = progress;
         }
         UpdateAggregatedProgress();
     }
 
     /// <summary>
-    /// Claudeステータスメッセージを更新する（オーバーレイのステータス文字列を担当）
+    /// LLMステータスメッセージを更新する（オーバーレイのステータス文字列を担当）
     /// </summary>
     /// <param name="status">ステータスメッセージ</param>
-    private void UpdateClaudeStatus(string status)
+    private void UpdateLlmStatus(string status)
     {
         lock (_progressLock)
         {
-            _claudeStatus = status;
+            _llmStatus = status;
         }
         UpdateAggregatedProgress();
     }
@@ -722,21 +713,29 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             if (count <= 0)
             {
                 // 並列ダウンロード前（Pythonのみの段階）はそのまま使う
-                aggregated = _pythonProgress;
-                anyDownloading = _pythonProgress > 0 && _pythonProgress < 100;
-                statusMessage = _pythonStatus;
+                // LLM ダウンロード中の場合はそちらを優先
+                if (_llmProgress > 0 && _llmProgress < 100)
+                {
+                    aggregated = _llmProgress;
+                    anyDownloading = true;
+                    statusMessage = !string.IsNullOrEmpty(_llmStatus) ? _llmStatus : "LLMダウンロード中...";
+                }
+                else
+                {
+                    aggregated = _pythonProgress;
+                    anyDownloading = _pythonProgress > 0 && _pythonProgress < 100;
+                    statusMessage = _pythonStatus;
+                }
             }
             else
             {
-                // ffmpeg と Claude の進捗を均等に加重平均（未開始=0, 完了=100 で計算）
-                aggregated = (_ffmpegProgress + _claudeProgress) / count;
-                anyDownloading = (_ffmpegProgress > 0 && _ffmpegProgress < 100)
-                              || (_claudeProgress > 0 && _claudeProgress < 100);
+                // ffmpeg の進捗を均等に加重平均（未開始=0, 完了=100 で計算）
+                aggregated = _ffmpegProgress / count;
+                anyDownloading = _ffmpegProgress > 0 && _ffmpegProgress < 100;
 
                 // ステータスメッセージ: アクティブなダウンロードの状況を結合表示
                 var parts = new List<string>(2);
                 if (!string.IsNullOrEmpty(_ffmpegStatus)) parts.Add(_ffmpegStatus.TrimEnd('.'));
-                if (!string.IsNullOrEmpty(_claudeStatus)) parts.Add(_claudeStatus.TrimEnd('.'));
                 statusMessage = parts.Count > 0 ? string.Join(" / ", parts) : "準備中...";
             }
         }
@@ -761,6 +760,41 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             IsProcessing = false;
         });
+    }
+
+    // ────────────────────────────────────────────
+    //  GPU検出
+    // ────────────────────────────────────────────
+
+    /// <summary>
+    /// レジストリからAMD GPUの存在を検出する（WMI不要・AOT互換）。
+    /// </summary>
+    private static bool IsAmdGpuPresent()
+    {
+        try
+        {
+            // Display adapter のレジストリキーからGPU情報を取得
+            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
+                @"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}");
+            if (key is null) return false;
+
+            foreach (var subKeyName in key.GetSubKeyNames())
+            {
+                if (!char.IsDigit(subKeyName[0])) continue;
+                using var subKey = key.OpenSubKey(subKeyName);
+                var desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
+                if (desc.Contains("AMD", StringComparison.OrdinalIgnoreCase) ||
+                    desc.Contains("Radeon", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+        }
+        catch
+        {
+            // レジストリ読み取り不可の場合はデフォルト（CUDA自動検出）に任せる
+        }
+        return false;
     }
 
     // ────────────────────────────────────────────
@@ -818,6 +852,23 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             catch (Exception ex)
             {
                 System.Diagnostics.Debug.WriteLine($"WebScraperService解放中にエラー: {ex.Message}");
+            }
+
+            // LLM インスタンスを解放（DisposeAsync でOllamaプロセスを安全に停止）
+            try
+            {
+                if (_llm is IAsyncDisposable asyncDisposable)
+                {
+                    asyncDisposable.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+                else
+                {
+                    (_llm as IDisposable)?.Dispose();
+                }
+            }
+            catch (Exception ex)
+            {
+                System.Diagnostics.Debug.WriteLine($"LLM解放中にエラー: {ex.Message}");
             }
         }
     }

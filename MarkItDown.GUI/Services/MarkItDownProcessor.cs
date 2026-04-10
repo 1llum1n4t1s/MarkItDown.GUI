@@ -15,8 +15,6 @@ public class MarkItDownProcessor
     private readonly Action<string> _logMessage;
     private readonly Action<string> _logError;
     private readonly string? _ffmpegBinPath;
-    private string? _claudeNodePath;
-    private string? _claudeCliPath;
 
     /// <summary>
     /// Constructor
@@ -24,28 +22,13 @@ public class MarkItDownProcessor
     /// <param name="pythonExecutablePath">Path to Python executable</param>
     /// <param name="logMessage">Log output function</param>
     /// <param name="ffmpegBinPath">Path to ffmpeg bin directory (optional)</param>
-    /// <param name="claudeNodePath">Claude Code Node.js path (optional)</param>
-    /// <param name="claudeCliPath">Claude Code CLI js path (optional)</param>
     /// <param name="logError">Error log delegate (optional, defaults to logMessage)</param>
-    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null, string? claudeNodePath = null, string? claudeCliPath = null, Action<string>? logError = null)
+    public MarkItDownProcessor(string pythonExecutablePath, Action<string> logMessage, string? ffmpegBinPath = null, Action<string>? logError = null)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
         _logError = logError ?? logMessage;
         _ffmpegBinPath = ffmpegBinPath;
-        _claudeNodePath = claudeNodePath;
-        _claudeCliPath = claudeCliPath;
-    }
-
-    /// <summary>
-    /// Claude Code CLI 接続情報を後から設定する
-    /// </summary>
-    /// <param name="nodePath">Node.js 実行パス</param>
-    /// <param name="cliJsPath">Claude Code CLI の cli.js パス</param>
-    public void SetClaudeConfig(string nodePath, string cliJsPath)
-    {
-        _claudeNodePath = nodePath;
-        _claudeCliPath = cliJsPath;
     }
 
     /// <summary>
@@ -181,18 +164,6 @@ public class MarkItDownProcessor
             {
                 var currentPath = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
                 startInfo.Environment["PATH"] = $"{_ffmpegBinPath};{currentPath}";
-            }
-
-            if (!string.IsNullOrEmpty(_claudeNodePath))
-            {
-                startInfo.Environment["CLAUDE_NODE_PATH"] = _claudeNodePath;
-                _logMessage($"Claude Node.js設定: {_claudeNodePath}");
-            }
-
-            if (!string.IsNullOrEmpty(_claudeCliPath))
-            {
-                startInfo.Environment["CLAUDE_CLI_PATH"] = _claudeCliPath;
-                _logMessage($"Claude CLI設定: {_claudeCliPath}");
             }
 
             using var process = Process.Start(startInfo);

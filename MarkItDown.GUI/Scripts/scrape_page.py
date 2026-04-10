@@ -1,15 +1,11 @@
 """
-Playwright + Claude Code CLI を使用した AI ガイド型 Web スクレイピングスクリプト。
+Playwright + DOM解析ベースの Web スクレイピングスクリプト。
 
-Claude Code CLI にページ構造を分析させ、最適な CSS セレクタと抽出戦略を
+ページのDOM構造をヒューリスティックに分析し、最適な CSS セレクタと抽出戦略を
 動的に決定してスクレイピングを行う。
 
 Usage:
     python scrape_page.py <url> <output_path>
-
-環境変数:
-    CLAUDE_NODE_PATH - Node.js の実行パス
-    CLAUDE_CLI_PATH  - Claude Code CLI の実行パス
 
 出力: JSON形式のページデータ
 """
@@ -19,7 +15,7 @@ import os
 import re
 import subprocess
 import sys
-import threading
+
 import time
 import traceback
 from urllib.parse import urljoin, urlparse
@@ -66,12 +62,12 @@ def check_playwright_browsers() -> bool:
 
 
 # ────────────────────────────────────────────
-#  Claude Code CLI ページ分析・戦略生成
+#  ページ分析・戦略生成
 # ────────────────────────────────────────────
 
 def get_page_summary(page, url: str) -> dict:
     """
-    ページ構造のサマリーを生成する（Claude に送信するためのコンパクトな情報）。
+    ページ構造のサマリーを生成する。
     HTMLそのものは大きすぎるため、DOM統計とサンプルを送る。
     """
     summary = {
@@ -147,198 +143,88 @@ def get_page_summary(page, url: str) -> dict:
     return summary
 
 
-def claude_call(prompt, stdin_text=""):
-    """Claude Code CLI を呼び出してレスポンスを取得する"""
-    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
-    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
-    if not node_path or not cli_path:
-        return None
-    try:
-        env = {**os.environ, "CI": "true"}
-        result = subprocess.run(
-            [node_path, cli_path, "-p", prompt],
-            input=stdin_text, capture_output=True, text=True,
-            timeout=300, env=env
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-        else:
-            log(f"Claude CLI エラー (exit {result.returncode}): {result.stderr[:200]}")
-            return None
-    except subprocess.TimeoutExpired:
-        log_error("Claude CLI がタイムアウトしました")
-        return None
-    except (subprocess.SubprocessError, OSError, ValueError) as e:
-        log_error(f"Claude CLI 呼び出しエラー: {e}")
-        return None
-
-
 def generate_scraping_strategy(page_summary: dict) -> dict:
-    """
-    Claude Code CLI にページ構造を分析させ、スクレイピング戦略 JSON を返す。
-    """
-    prompt = build_strategy_prompt(page_summary)
+    """ページのDOM構造を解析し、ヒューリスティックでスクレイピング戦略を生成する。"""
+    dom_stats = page_summary.get("dom_stats", {})
+    tag_counts = dom_stats.get("tag_counts", {})
+    common_classes = dom_stats.get("common_classes", [])
+    ids = dom_stats.get("ids", [])
 
-    # 推論中にハートビートを出力してC#側のアイドルタイムアウトを回避
-    stop_heartbeat = threading.Event()
+    # ページタイプ推定
+    article_count = tag_counts.get("article", 0)
+    has_many_articles = article_count >= 3
+    has_single_article = article_count == 1
+    has_comments = any("comment" in c.lower() for c in common_classes)
 
-    def heartbeat():
-        elapsed = 0
-        while not stop_heartbeat.wait(30):
-            elapsed += 30
-            log(f"Claude 推論中... ({elapsed}秒経過)")
-
-    hb_thread = threading.Thread(target=heartbeat, daemon=True)
-    hb_thread.start()
-
-    try:
-        log("Claude Code CLI にスクレイピング戦略を問い合わせ中...")
-        response_text = claude_call(prompt)
-    finally:
-        stop_heartbeat.set()
-        hb_thread.join(timeout=1)
-
-    if not response_text:
-        raise ValueError("Claude Code CLI から応答を取得できませんでした")
-
-    log(f"Claude 応答長: {len(response_text)} 文字")
-
-    strategy_json = extract_json_from_text(response_text)
-    if not strategy_json:
-        log(f"Claude の応答から有効な JSON を抽出できませんでした: {response_text[:200]}")
-        raise ValueError("Claude Code CLI から有効なスクレイピング戦略を取得できませんでした")
-
-    strategy = json.loads(strategy_json)
-    log(f"戦略生成完了: page_type={strategy.get('page_type', 'unknown')}")
-    return strategy
-
-
-def build_strategy_prompt(page_summary: dict) -> str:
-    """Claude Code CLI に送るスクレイピング戦略生成プロンプトを構築する"""
-    dom_stats = json.dumps(page_summary.get("dom_stats", {}), ensure_ascii=False, indent=2)
-
-    return f"""以下の Web ページの構造を分析し、最適なスクレイピング戦略を JSON で返してください。
-
-【ページ情報】
-URL: {page_summary['url']}
-タイトル: {page_summary['title']}
-
-【DOM統計】
-{dom_stats}
-
-【HTMLサンプル（先頭4000文字）】
-{page_summary.get('sample_html', '')}
-
-【可視テキストサンプル（先頭500文字）】
-{page_summary.get('visible_text_sample', '')}
-
-【指示】
-以下の項目を分析し、JSON で返してください:
-1. page_type: ページの種類（blog_listing, article, product_page, forum_thread, news, portfolio, generic のいずれか）
-2. content_selectors: メインコンテンツ領域の CSS セレクタ
-   - main_container: メインコンテンツを囲む要素（例: "article.post", "main", "#content"）
-   - title: タイトル要素（例: "h1.entry-title"）
-   - body: 本文要素（例: ".entry-content", ".post-body"）
-   - author: 著者要素（あれば）
-   - date: 日付要素（あれば）
-   - items: リストページの場合、各アイテムのセレクタ（例: ".post-item", "article"）
-3. pagination: ページネーション情報
-   - next_selector: 次のページへのリンクの CSS セレクタ（なければ null）
-4. ignore_selectors: 無視すべき要素の CSS セレクタ配列（ナビ、広告、サイドバー等）
-5. extraction_fields: 抽出するフィールド定義の配列
-   - name: フィールド名
-   - selector: CSS セレクタ
-   - attribute: 取得する属性（省略時は innerText）
-
-【出力形式】
-以下の JSON フォーマットのみを出力してください:
-{{
-  "page_type": "blog_listing",
-  "content_selectors": {{
-    "main_container": "main",
-    "title": "h1",
-    "body": ".content",
-    "author": ".author",
-    "date": "time",
-    "items": "article"
-  }},
-  "pagination": {{
-    "next_selector": "a.next"
-  }},
-  "ignore_selectors": ["nav", "footer", ".sidebar", ".ad"],
-  "extraction_fields": [
-    {{"name": "title", "selector": "h1"}},
-    {{"name": "content", "selector": ".content"}},
-    {{"name": "date", "selector": "time", "attribute": "datetime"}}
-  ]
-}}"""
-
-
-def extract_json_from_text(text: str) -> str | None:
-    """テキストから JSON 部分を抽出する"""
-    # ```json ... ``` ブロックを優先
-    m = re.search(r"```(?:json)?\s*\n?(.*?)\n?```", text, re.DOTALL)
-    if m:
-        candidate = m.group(1).strip()
-        try:
-            json.loads(candidate)
-            return candidate
-        except json.JSONDecodeError:
-            pass
-
-    # JSON オブジェクトまたは配列をスタックベースで検出
-    first_brace = text.find('{')
-    first_bracket = text.find('[')
-
-    if first_brace == -1 and first_bracket == -1:
-        return None
-
-    # 先に出現する開始文字を特定
-    if first_brace != -1 and (first_bracket == -1 or first_brace < first_bracket):
-        start_pos = first_brace
-        open_char = '{'
-        close_char = '}'
+    if has_comments or has_single_article:
+        page_type = "article"
+    elif has_many_articles:
+        page_type = "blog_listing"
     else:
-        start_pos = first_bracket
-        open_char = '['
-        close_char = ']'
+        page_type = "generic"
 
-    # スタックで対応する閉じ文字を探す（文字列リテラル内を考慮）
-    depth = 0
-    in_string = False
-    escape_next = False
-    end_pos = -1
-
-    for i in range(start_pos, len(text)):
-        c = text[i]
-        if escape_next:
-            escape_next = False
-            continue
-        if c == '\\' and in_string:
-            escape_next = True
-            continue
-        if c == '"' :
-            in_string = not in_string
-            continue
-        if in_string:
-            continue
-        if c == open_char:
-            depth += 1
-        elif c == close_char:
-            depth -= 1
-            if depth == 0:
-                end_pos = i
+    # メインコンテナの推定
+    main_container = "body"
+    for candidate_id in ids:
+        lid = candidate_id.lower()
+        if any(k in lid for k in ("content", "main", "article", "post", "entry")):
+            main_container = f"#{candidate_id}"
+            break
+    else:
+        for cls_raw in common_classes:
+            cls = cls_raw.split("(")[0]
+            lcls = cls.lower()
+            if any(k in lcls for k in ("content", "article", "post", "entry", "main")):
+                main_container = f".{cls}"
                 break
+        else:
+            if tag_counts.get("main", 0) > 0:
+                main_container = "main"
+            elif tag_counts.get("article", 0) > 0:
+                main_container = "article"
 
-    if end_pos > start_pos:
-        candidate = text[start_pos:end_pos + 1]
-        try:
-            json.loads(candidate)
-            return candidate
-        except json.JSONDecodeError:
-            pass
+    # ページネーション推定
+    next_selector = None
+    for cls_raw in common_classes:
+        cls = cls_raw.split("(")[0]
+        lcls = cls.lower()
+        if any(k in lcls for k in ("next", "pagination", "pager")):
+            next_selector = f"a.{cls}"
+            break
 
-    return None
+    # bodyセレクタ: コンテナ内のテキスト要素（コンテナ自体ではなく子要素を指す）
+    body_selector = "p"  # デフォルトは段落要素
+    for cls_raw in common_classes:
+        cls = cls_raw.split("(")[0]
+        lcls = cls.lower()
+        if any(k in lcls for k in ("body", "text", "prose", "entry-content", "post-content")):
+            body_selector = f".{cls}"
+            break
+
+    strategy = {
+        "page_type": page_type,
+        "content_selectors": {
+            "main_container": main_container,
+            "title": "h1",
+            "body": body_selector,
+            "author": None,
+            "date": "time",
+            "items": "article" if has_many_articles else None,
+        },
+        "pagination": {
+            "next_selector": next_selector,
+        },
+        "ignore_selectors": ["nav", "footer", "header", ".sidebar", ".ad", ".advertisement",
+                             ".cookie", ".popup", "[role=navigation]", "[role=banner]"],
+        "extraction_fields": [
+            {"name": "title", "selector": "h1"},
+            {"name": "content", "selector": main_container},
+            {"name": "date", "selector": "time", "attribute": "datetime"},
+        ],
+    }
+
+    log(f"戦略生成完了（DOM解析）: page_type={page_type}, container={main_container}")
+    return strategy
 
 
 # ────────────────────────────────────────────
@@ -347,7 +233,7 @@ def extract_json_from_text(text: str) -> str | None:
 
 def extract_with_strategy(page, url: str, strategy: dict) -> dict:
     """
-    Claude が生成した戦略に基づいてページデータを抽出する。
+    戦略に基づいてページデータを抽出する。
     """
     data = {
         "url": url,
@@ -866,15 +752,7 @@ def main():
     log(f"URL: {url}")
     log(f"出力先: {output_path}")
 
-    # Claude Code CLI 設定を環境変数から取得
-    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
-    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
-
-    if not node_path or not cli_path:
-        log("エラー: CLAUDE_NODE_PATH / CLAUDE_CLI_PATH 環境変数が設定されていません")
-        sys.exit(1)
-
-    log(f"Claude Code CLI: node={node_path} / cli={cli_path}")
+    log("DOM解析ベースのスクレイピングを開始するのだ。")
 
     # Playwright の利用可能性チェック
     if sync_playwright is None:
@@ -937,7 +815,7 @@ def main():
                     dismiss_cookie_banners(page)
                     _dismiss_overlays(page)
 
-                # Claude Code CLI に戦略を問い合わせ（初回）
+                # DOM解析で戦略を生成（初回）
                 if strategy is None:
                     log("ページ構造を分析中...")
                     page_summary = get_page_summary(page, current_url)
@@ -985,7 +863,7 @@ def main():
                         log("クリック可能な要素がないため、このページの読み込みを完了します")
                         break
 
-                    # 次のラウンド前に Claude Code CLI に戦略を再問い合わせ
+                    # 次のラウンド前に戦略を再生成
                     if remaining_time() > 60:
                         log("ページ構造を再分析中...")
                         page_summary = get_page_summary(page, current_url)

@@ -42,7 +42,7 @@ public static class TimeoutSettings
 
     /// <summary>
     /// Timeout for MarkItDown file conversion (10 minutes)
-    /// Claudeでの画像説明生成を含む場合、処理に時間がかかるため長めに設定
+    /// 画像説明生成を含む場合、処理に時間がかかるため長めに設定
     /// </summary>
     public const int FileConversionTimeoutMs = 600000;
 

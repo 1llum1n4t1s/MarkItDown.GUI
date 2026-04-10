@@ -19,7 +19,7 @@
                            FontSize="12"
                            Foreground="#999999"/>
                 <TextBox x:Name="UsernameInput"
-                         Watermark="ユーザー名"
+                         PlaceholderText="ユーザー名"
                          FontSize="14"/>
             </StackPanel>
 
@@ -28,7 +28,7 @@
                            FontSize="12"
                            Foreground="#999999"/>
                 <TextBox x:Name="PasswordInput"
-                         Watermark="パスワード"
+                         PlaceholderText="パスワード"
                          PasswordChar="●"
                          FontSize="14"/>
             </StackPanel>

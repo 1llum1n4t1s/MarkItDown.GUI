@@ -8,13 +8,14 @@ using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using LlmChamber;
 using MarkItDown.GUI.Models;
 
 namespace MarkItDown.GUI.Services;
 
 /// <summary>
 /// Webページをスクレイピングし、JSONで出力するサービス。
-/// Reddit は JSON API、その他は Playwright + Claude ガイド型で抽出する。
+/// Reddit は JSON API、その他は Playwright + LLM ガイド型で抽出する。
 /// </summary>
 public sealed class WebScraperService : IDisposable
 {
@@ -23,7 +24,7 @@ public sealed class WebScraperService : IDisposable
     private readonly Action<string> _logError;
     private readonly Action<string>? _statusCallback;
     private PlaywrightScraperService? _playwrightScraper;
-    private ClaudeCodeProcessHost? _claudeHost;
+    private ILocalLlm? _llm;
 
     public WebScraperService(Action<string> logMessage, Action<string>? statusCallback = null, Action<string>? logError = null)
     {
@@ -59,11 +60,11 @@ public sealed class WebScraperService : IDisposable
     public PlaywrightScraperService? GetPlaywrightScraper() => _playwrightScraper;
 
     /// <summary>
-    /// Claude Code CLI 接続情報を設定する（JSON整形に使用）
+    /// ローカルLLM インスタンスを設定する（JSON整形に使用）
     /// </summary>
-    public void SetClaudeConfig(string nodePath, string cliJsPath)
+    public void SetLlm(ILocalLlm llm)
     {
-        _claudeHost = new ClaudeCodeProcessHost();
+        _llm = llm;
     }
 
     // ────────────────────────────────────────────
@@ -72,7 +73,7 @@ public sealed class WebScraperService : IDisposable
 
     /// <summary>
     /// 任意のURLからページ情報を抽出し、JSONファイルとして保存する。
-    /// Reddit は JSON API で取得、その他は Playwright + Claude ガイド型で
+    /// Reddit は JSON API で取得、その他は Playwright + LLM ガイド型で
     /// 動的コンテンツ（ページネーション・もっと見る等）を含めて取得する。
     /// </summary>
     public async Task ScrapeAsync(string url, string outputPath, CancellationToken ct = default)
@@ -119,7 +120,7 @@ public sealed class WebScraperService : IDisposable
             _logMessage($"X.com 専用スクレイピングを開始するのだ: @{username}");
             await _playwrightScraper.ScrapeXTwitterAsync(username, outputDir, ct).ConfigureAwait(false);
 
-            // X.comはデータが膨大になるためClaude整形をスキップ
+            // X.comはデータが膨大になるためLLM整形をスキップ
             _statusCallback?.Invoke("スクレイピング完了");
             return;
         }
@@ -155,7 +156,7 @@ public sealed class WebScraperService : IDisposable
             }
             await _playwrightScraper.ScrapeInstagramAsync(target, outputDir, ct).ConfigureAwait(false);
 
-            // Instagram はメディアファイルのみダウンロードのためClaude整形不要
+            // Instagram はメディアファイルのみダウンロードのためLLM整形不要
             _statusCallback?.Invoke("スクレイピング完了");
             return;
         }
@@ -166,14 +167,14 @@ public sealed class WebScraperService : IDisposable
                 throw new InvalidOperationException("スクレイパーが初期化されていません。");
             }
 
-            // HTTP + Claude ガイド型でスクレイピング（ブラウザ不要）
+            // HTTP + LLM ガイド型でスクレイピング（ブラウザ不要）
             _statusCallback?.Invoke("HTTP でスクレイピング中...");
-            _logMessage("HTTP + Claude ガイド型でスクレイピングするのだ（ブラウザ不使用）...");
+            _logMessage("HTTP + LLM ガイド型でスクレイピングするのだ（ブラウザ不使用）...");
             await _playwrightScraper.ScrapeWithHttpAsync(url, outputPath, ct).ConfigureAwait(false);
         }
 
-        // Claude で JSON を整形・まとめし、3ファイル出力する
-        await ProcessJsonWithClaudeAsync(outputPath, ct).ConfigureAwait(false);
+        // LLM で JSON を整形・まとめし、3ファイル出力する
+        await ProcessJsonWithLlmAsync(outputPath, ct).ConfigureAwait(false);
 
         _statusCallback?.Invoke("スクレイピング完了");
     }
@@ -258,15 +259,15 @@ public sealed class WebScraperService : IDisposable
     }
 
     // ────────────────────────────────────────────
-    //  Claude JSON整形
+    //  LLM JSON整形
     // ────────────────────────────────────────────
 
     /// <summary>
-    /// スクレイピング結果のJSONを3種類のファイルに分けて出力する。
-    /// 元データ（生JSON）、整形済（Claude整形JSON）、まとめ済（ClaudeによるMarkdownまとめ）。
-    /// Claudeが利用できない場合は元データのリネームのみ行う。
+    /// スクレイピング結果のJSONを2種類のファイルに分けて出力する。
+    /// 元データ（生JSON）、まとめ済（LLMによるMarkdownまとめ）。
+    /// LLMが利用できない場合は元データのリネームのみ行う。
     /// </summary>
-    private async Task ProcessJsonWithClaudeAsync(string jsonFilePath, CancellationToken ct)
+    private async Task ProcessJsonWithLlmAsync(string jsonFilePath, CancellationToken ct)
     {
         if (!File.Exists(jsonFilePath))
         {
@@ -287,10 +288,25 @@ public sealed class WebScraperService : IDisposable
         File.Move(jsonFilePath, originPath);
         _logMessage($"元データ出力完了なのだ: {originPath}");
 
-        if (_claudeHost is null || !_claudeHost.IsAvailable())
+        if (_llm is null)
         {
-            _logMessage("Claude が設定されていないため、整形・まとめをスキップするのだ。");
+            _logMessage("LLM が設定されていないため、まとめをスキップするのだ。");
             return;
+        }
+
+        // LLMがまだ初期化中なら完了を待つ
+        if (!_llm.IsReady)
+        {
+            _logMessage("LLM がまだ準備中なのだ。初期化完了を待機中...");
+            _statusCallback?.Invoke("LLM の初期化完了を待機中...");
+            await _llm.InitializeAsync(ct).ConfigureAwait(false);
+
+            if (!_llm.IsReady)
+            {
+                _logMessage("LLM の初期化に失敗したのだ。まとめをスキップするのだ。");
+                return;
+            }
+            _logMessage("LLM の初期化が完了したのだ！");
         }
 
         try
@@ -299,48 +315,16 @@ public sealed class WebScraperService : IDisposable
 
             if (string.IsNullOrWhiteSpace(rawJson))
             {
-                _logMessage("JSONファイルが空のため、整形・まとめをスキップするのだ。");
+                _logMessage("JSONファイルが空のため、まとめをスキップするのだ。");
                 return;
             }
 
-            // 2. 整形済: Claude でJSON整形
-            _statusCallback?.Invoke("Claude でJSON整形中...");
-            _logMessage("Claude でJSON整形を開始するのだ...");
+            // 2. まとめ済: LLM でMarkdownまとめ
+            _statusCallback?.Invoke("LLM でJSONまとめ中...");
+            _logMessage("LLM でJSONまとめを開始するのだ...");
 
-            const int chunkThreshold = 30_000;
-            string? formattedJson;
-            if (rawJson.Length <= chunkThreshold)
-            {
-                formattedJson = await FormatJsonChunkWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
-            }
-            else
-            {
-                formattedJson = await FormatLargeJsonWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
-            }
-
-            if (!string.IsNullOrWhiteSpace(formattedJson))
-            {
-                try
-                {
-                    JsonSerializer.Deserialize(formattedJson, AppJsonContext.Default.JsonElement);
-                    await WriteClaudeOutputAsync(formattedJson, dir, nameWithoutExt, timestamp, "整形済", "json", ct).ConfigureAwait(false);
-                }
-                catch (JsonException)
-                {
-                    _logMessage("Claude の出力が有効なJSONではないため、整形済ファイルの出力をスキップするのだ。");
-                }
-            }
-            else
-            {
-                _logMessage("Claude からの応答が空のため、整形済ファイルの出力をスキップするのだ。");
-            }
-
-            // 3. まとめ済: Claude でMarkdownまとめ
-            _statusCallback?.Invoke("Claude でJSONまとめ中...");
-            _logMessage("Claude でJSONまとめを開始するのだ...");
-
-            var summaryMd = await SummarizeJsonWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
-            await WriteClaudeOutputAsync(summaryMd, dir, nameWithoutExt, timestamp, "まとめ済", "md", ct).ConfigureAwait(false);
+            var summaryMd = await SummarizeJsonWithLlmAsync(rawJson, ct).ConfigureAwait(false);
+            await WriteLlmOutputAsync(summaryMd, dir, nameWithoutExt, timestamp, "まとめ済", "md", ct).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -349,31 +333,31 @@ public sealed class WebScraperService : IDisposable
         }
         catch (HttpRequestException ex)
         {
-            _logError($"Claude への接続に失敗したのだ: {ex.Message}");
+            _logError($"LLM への接続に失敗したのだ: {ex.Message}");
             _logMessage("元データのみ保持するのだ。");
         }
         catch (OperationCanceledException)
         {
-            _logMessage("Claude の処理がタイムアウトしたのだ。元データのみ保持するのだ。");
+            _logMessage("LLM の処理がタイムアウトしたのだ。元データのみ保持するのだ。");
         }
         catch (Exception ex)
         {
-            _logError($"JSON整形・まとめ中にエラーが発生したのだ: {ex.Message}");
+            _logError($"JSONまとめ中にエラーが発生したのだ: {ex.Message}");
             _logMessage("元データのみ保持するのだ。");
         }
     }
 
     /// <summary>
-    /// Claude の出力をファイルに書き込む共通ヘルパー。
+    /// LLM の出力をファイルに書き込む共通ヘルパー。
     /// content が空の場合はスキップし、書き込んだパスを返す（スキップ時は null）。
     /// </summary>
-    private async Task<string?> WriteClaudeOutputAsync(
+    private async Task<string?> WriteLlmOutputAsync(
         string? content, string directory, string baseName, string timestamp,
         string suffix, string extension, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(content))
         {
-            _logMessage($"Claude からの{suffix}応答が空のため、{suffix}ファイルの出力をスキップするのだ。");
+            _logMessage($"LLM からの{suffix}応答が空のため、{suffix}ファイルの出力をスキップするのだ。");
             return null;
         }
 
@@ -384,170 +368,24 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// 単一チャンクのJSONをClaudeで整形する
+    /// ローカルLLM を呼び出す
     /// </summary>
-    private async Task<string?> FormatJsonChunkWithClaudeAsync(string rawJson, CancellationToken ct)
+    private async Task<string?> CallLlmAsync(string systemPrompt, string userMessage, CancellationToken ct)
     {
-        return await CallClaudeAsync(FormatSystemPrompt, BuildFormatUserPrompt(rawJson), ct).ConfigureAwait(false);
-    }
-
-    /// <summary>
-    /// 大きなJSONをチャンク分割してClaudeで整形する。
-    /// トップレベルの構造を維持しつつ、ページ単位で分割処理する。
-    /// </summary>
-    private async Task<string?> FormatLargeJsonWithClaudeAsync(string rawJson, CancellationToken ct)
-    {
-        _statusCallback?.Invoke("JSONをチャンク分割で整形中...");
-        _logMessage("JSONが大きいため、チャンク分割で整形するのだ...");
-
-        try
-        {
-            var root = JsonSerializer.Deserialize(rawJson, AppJsonContext.Default.JsonElement);
-
-            // 複数ページ構造の場合、ページごとに分割処理
-            if (root.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty("pages", out var pages) &&
-                pages.ValueKind == JsonValueKind.Array)
-            {
-                return await FormatMultiPageJsonAsync(root, pages, ct).ConfigureAwait(false);
-            }
-
-            // 単一オブジェクトの場合、content配列を分割して処理
-            if (root.ValueKind == JsonValueKind.Object &&
-                root.TryGetProperty("content", out var content) &&
-                content.ValueKind == JsonValueKind.Array)
-            {
-                return await FormatSinglePageLargeJsonAsync(root, content, ct).ConfigureAwait(false);
-            }
-
-            // その他の場合は分割せずにそのまま送信（サイズ制限超えでも試行）
-            _logMessage("JSONの構造が分割に適していないため、一括で整形を試みるのだ...");
-            return await FormatJsonChunkWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
-        }
-        catch (JsonException)
-        {
-            _logError("JSON解析エラーのため、一括で整形を試みるのだ...");
-            return await FormatJsonChunkWithClaudeAsync(rawJson, ct).ConfigureAwait(false);
-        }
-    }
-
-    /// <summary>
-    /// 複数ページ構造のJSONを整形する（ページ単位で分割）
-    /// </summary>
-    private async Task<string?> FormatMultiPageJsonAsync(
-        JsonElement root, JsonElement pages, CancellationToken ct)
-    {
-        var formattedPages = new List<JsonElement>();
-        var pageCount = pages.GetArrayLength();
-
-        for (var i = 0; i < pageCount; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            _statusCallback?.Invoke($"ページ {i + 1}/{pageCount} を整形中...");
-            _logMessage($"ページ {i + 1}/{pageCount} を整形中なのだ...");
-
-            var pageJson = JsonSerializer.Serialize(pages[i], AppJsonIndentedContext.Default.JsonElement);
-            var formatted = await FormatJsonChunkWithClaudeAsync(pageJson, ct).ConfigureAwait(false);
-
-            if (!string.IsNullOrWhiteSpace(formatted))
-            {
-                try
-                {
-                    formattedPages.Add(JsonSerializer.Deserialize(formatted, AppJsonContext.Default.JsonElement));
-                    continue;
-                }
-                catch (JsonException)
-                {
-                    _logMessage($"ページ {i + 1} の整形結果が無効なJSONのため、元データを使用するのだ。");
-                }
-            }
-            // 整形失敗時は元のページデータを保持
-            formattedPages.Add(pages[i]);
-        }
-
-        // トップレベル構造を再構築
-        var resultDict = new Dictionary<string, JsonElement>();
-        foreach (var prop in root.EnumerateObject())
-        {
-            if (prop.Name == "pages")
-            {
-                resultDict["pages"] = JsonSerializer.SerializeToElement(formattedPages, AppJsonContext.Default.ListJsonElement);
-            }
-            else
-            {
-                resultDict[prop.Name] = prop.Value;
-            }
-        }
-
-        return JsonSerializer.Serialize(resultDict, AppJsonIndentedContext.Default.DictionaryStringJsonElement);
-    }
-
-    /// <summary>
-    /// 単一ページJSONのcontent配列を要素ごとに分割して整形する
-    /// </summary>
-    private async Task<string?> FormatSinglePageLargeJsonAsync(
-        JsonElement root, JsonElement contentArray, CancellationToken ct)
-    {
-        var formattedItems = new List<JsonElement>();
-        var itemCount = contentArray.GetArrayLength();
-
-        for (var i = 0; i < itemCount; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            _statusCallback?.Invoke($"content要素 {i + 1}/{itemCount} を整形中...");
-            _logMessage($"content要素 {i + 1}/{itemCount} を整形中なのだ...");
-
-            var itemJson = JsonSerializer.Serialize(contentArray[i], AppJsonIndentedContext.Default.JsonElement);
-            var formatted = await FormatJsonChunkWithClaudeAsync(itemJson, ct).ConfigureAwait(false);
-
-            if (!string.IsNullOrWhiteSpace(formatted))
-            {
-                try
-                {
-                    formattedItems.Add(JsonSerializer.Deserialize(formatted, AppJsonContext.Default.JsonElement));
-                    continue;
-                }
-                catch (JsonException)
-                {
-                    _logMessage($"content要素 {i + 1} の整形結果が無効なJSONのため、元データを使用するのだ。");
-                }
-            }
-            // 整形失敗時は元のデータを保持
-            formattedItems.Add(contentArray[i]);
-        }
-
-        // トップレベル構造を再構築
-        var resultDict = new Dictionary<string, JsonElement>();
-        foreach (var prop in root.EnumerateObject())
-        {
-            if (prop.Name == "content")
-            {
-                resultDict["content"] = JsonSerializer.SerializeToElement(formattedItems, AppJsonContext.Default.ListJsonElement);
-            }
-            else
-            {
-                resultDict[prop.Name] = prop.Value;
-            }
-        }
-
-        return JsonSerializer.Serialize(resultDict, AppJsonIndentedContext.Default.DictionaryStringJsonElement);
-    }
-
-    /// <summary>
-    /// Claude Code CLI を呼び出す
-    /// </summary>
-    private async Task<string?> CallClaudeAsync(string systemPrompt, string userMessage, CancellationToken ct)
-    {
-        if (_claudeHost is null)
+        if (_llm is null || !_llm.IsReady)
             return null;
 
         var prompt = $"{systemPrompt}\n\n{userMessage}";
-        var text = await _claudeHost.ExecuteAsync(prompt, "", ct).ConfigureAwait(false);
+        var text = await _llm.GenerateCompleteAsync(prompt, new InferenceOptions
+        {
+            Temperature = 0.1f,
+            MaxTokens = 8192
+        }, ct).ConfigureAwait(false);
 
         if (string.IsNullOrWhiteSpace(text))
             return null;
 
-        // Claude の応答から JSON 部分だけを抽出する
+        // LLM の応答から JSON 部分だけを抽出する
         // ```json ... ``` で囲まれている場合
         var codeBlockMatch = Regex.Match(text, @"```(?:json)?\s*\n?(.*?)\n?```",
             RegexOptions.Singleline);
@@ -611,62 +449,90 @@ public sealed class WebScraperService : IDisposable
     }
 
     /// <summary>
-    /// JSON整形用のシステムプロンプト
-    /// </summary>
-    private const string FormatSystemPrompt = """
-        あなたはJSON整形の専門家です。スクレイピングで取得した生のJSONデータを、
-        整った構造の読みやすいJSONに整形してください。
-
-        【重要な規則】
-        1. 情報を絶対に欠落させないでください。全てのデータを保持してください。
-        2. 出力はJSONのみにしてください。説明文やマークダウンは不要です。
-        3. 重複している内容は1つにまとめてください。
-        4. テキストコンテンツは意味のある単位でグループ化してください。
-        5. 空文字列や意味のないデータ（ナビゲーション要素、広告テキスト等）は除去してください。
-        6. 日本語と英語のコンテンツはそのまま保持してください。翻訳しないでください。
-        7. URLやリンク情報はそのまま保持してください。
-        8. 日時情報はISO 8601形式で保持してください。
-        9. ページ番号やメタデータも保持してください。
-        """;
-
-    /// <summary>
-    /// JSON整形用のユーザーメッセージを構築する
-    /// </summary>
-    private static string BuildFormatUserPrompt(string rawJson)
-    {
-        return $"以下のJSONを整形してください。整形されたJSONのみを出力してください:\n\n{rawJson}";
-    }
-
-    /// <summary>
     /// JSON分析・統計まとめ用のシステムプロンプト
     /// </summary>
-    private const string SummarySystemPrompt = """
-        あなたは文書分析の専門家です。
-        入力されたJSONデータの内容を分析し、統計情報と構造化されたまとめをMarkdown形式で作成してください。
-
-        【出力構成（この順序で出力すること）】
-        1. 概要: データ全体の目的・テーマを2〜3文で説明
-        2. 統計情報: レコード数、フィールド数、データ型の分布、ユニーク値の数など該当するものを表形式で列挙
-        3. データ構造: JSONの階層構造やキー一覧をツリー形式で表示
-        4. 主要トピック: データ内の主要なトピック・カテゴリを箇条書きで列挙し、各トピックの要点を1〜2文で説明
-        5. キーワード・固有名詞: データ内で重要なキーワード、固有名詞、数値データを列挙
-        6. 結論・要点: データから読み取れる結論や最も重要なポイントをまとめる
-
-        【ルール】
-        1. 元のテキストの言語をそのまま使用する（日本語→日本語、英語→英語）
-        2. JSONの構造そのものではなく、内容・意味を分析する
-        3. 出力はMarkdown形式のみ（JSONではない）
-        4. 情報を省略せず、網羅的に分析する
-        5. 分析結果のMarkdownだけを出力する（説明文や前置きは不要）
-        """;
+    private const string SummarySystemPrompt =
+        "あなたは日本語だけで回答するアシスタントです。英語では絶対に回答しません。";
 
     /// <summary>
-    /// Claude を使用してJSONデータを分析・統計まとめする
+    /// LLM を使用してJSONデータを分析・統計まとめする
     /// </summary>
-    private async Task<string?> SummarizeJsonWithClaudeAsync(string rawJson, CancellationToken ct)
+    /// <summary>
+    /// 日本語まとめ指示テンプレート。ユーザーメッセージに埋め込んでモデルを日本語出力に強制する。
+    /// </summary>
+    private const string JapaneseSummaryInstruction = """
+        【言語指定】日本語で回答してください。English output is forbidden.
+
+        以下のデータを分析し、日本語のMarkdownで出力してください。
+
+        出力テンプレート:
+        # （日本語のタイトル）
+        ## 概要
+        （3〜5文で具体的に説明）
+        ## 統計情報
+        | 項目 | 値 |
+        |---|---|
+        | 投稿数 | 数字 |
+        | コメント数 | 数字 |
+        ## 主要な投稿・話題
+        - **（タイトルを日本語訳）**（投稿者名）: 要点を日本語で説明
+        ## キーワード
+        - 固有名詞、技術用語
+        ## まとめ
+        （傾向・結論を日本語で記述）
+
+        英語の投稿タイトルやコメントはすべて日本語に翻訳すること。
+        固有名詞（Claude, Reddit, GPT等）はそのまま使用可。
+        """;
+
+    private async Task<string?> SummarizeJsonWithLlmAsync(string rawJson, CancellationToken ct)
     {
-        var userMessage = $"以下のJSONデータを分析し、統計情報と構造化されたまとめをMarkdown形式で作成してください:\n\n{rawJson}";
-        return await CallClaudeAsync(SummarySystemPrompt, userMessage, ct).ConfigureAwait(false);
+        const int chunkSize = 80_000; // Gemma 4 E4B のコンテキスト（128K）に余裕を持たせる
+
+        // 1チャンクに収まる場合はそのまま処理
+        if (rawJson.Length <= chunkSize)
+        {
+            var userMessage = $"{JapaneseSummaryInstruction}\n\n---\nデータ:\n{rawJson}\n---\n\n上記データの日本語まとめをMarkdownで出力してください。";
+            return await CallLlmAsync(SummarySystemPrompt, userMessage, ct).ConfigureAwait(false);
+        }
+
+        // チャンク分割 → 各チャンクをまとめ → 最終統合
+        _logMessage($"JSONが大きいため、チャンク分割でまとめるのだ（{rawJson.Length:N0}文字）...");
+        var chunkSummaries = new List<string>();
+        for (var offset = 0; offset < rawJson.Length; offset += chunkSize)
+        {
+            ct.ThrowIfCancellationRequested();
+            var chunk = rawJson.Substring(offset, Math.Min(chunkSize, rawJson.Length - offset));
+            var chunkNum = (offset / chunkSize) + 1;
+            var totalChunks = (rawJson.Length + chunkSize - 1) / chunkSize;
+
+            _statusCallback?.Invoke($"LLM でまとめ中... ({chunkNum}/{totalChunks})");
+            _logMessage($"チャンク {chunkNum}/{totalChunks} をまとめ中なのだ...");
+
+            var chunkMessage = $"{JapaneseSummaryInstruction}\n\n---\nデータ（パート{chunkNum}/{totalChunks}）:\n{chunk}\n---\n\n上記パートの内容を日本語で要約してください。";
+            var chunkSummary = await CallLlmAsync(SummarySystemPrompt, chunkMessage, ct).ConfigureAwait(false);
+            if (!string.IsNullOrWhiteSpace(chunkSummary))
+            {
+                chunkSummaries.Add(chunkSummary);
+            }
+        }
+
+        if (chunkSummaries.Count == 0)
+        {
+            return null;
+        }
+
+        // 最終統合
+        if (chunkSummaries.Count == 1)
+        {
+            return chunkSummaries[0];
+        }
+
+        _statusCallback?.Invoke("LLM で最終まとめを統合中...");
+        _logMessage("各チャンクのまとめを統合するのだ...");
+        var combined = string.Join("\n\n---\n\n", chunkSummaries);
+        var finalMessage = $"{JapaneseSummaryInstruction}\n\n---\n以下は同じデータの各パートの要約です:\n{combined}\n---\n\n上記の要約を統合して、1つの包括的な日本語のまとめをMarkdownで出力してください。";
+        return await CallLlmAsync(SummarySystemPrompt, finalMessage, ct).ConfigureAwait(false);
     }
 
     // ────────────────────────────────────────────
@@ -941,7 +807,7 @@ public sealed class WebScraperService : IDisposable
     //  Reddit サブレディット（コミュニティ一覧）スクレイパー
     // ════════════════════════════════════════════
 
-    private const int RedditMaxPosts = 200;  // 親投稿の最大取得件数
+    private const int RedditMaxPosts = 100;  // 親投稿の最大取得件数
     private const int RedditListingLimit = 100;  // Reddit API の1リクエストあたり最大件数
     private const int RedditApiDelayMs = 2000; // リクエスト間ディレイ（ms）— 非認証APIは厳しい制限があるため余裕を持つ
     private const int RedditMaxRetries = 5; // レート制限時の最大リトライ回数

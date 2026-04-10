@@ -2,7 +2,7 @@ import os
 import sys
 import json
 import traceback
-import subprocess
+
 from datetime import datetime
 from pathlib import Path
 import asyncio
@@ -42,122 +42,13 @@ def _write_output_file(content, base_name, suffix, timestamp, directory):
     log_message(f'{suffix}出力完了: {output_path}')
     return filename
 
-def claude_call(prompt, stdin_text=""):
-    """Claude Code CLI を呼び出してレスポンスを取得する"""
-    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
-    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
-    if not node_path or not cli_path:
-        return None
-    try:
-        env = {**os.environ, "CI": "true"}
-        result = subprocess.run(
-            [node_path, cli_path, "-p", prompt],
-            input=stdin_text, capture_output=True, text=True,
-            timeout=300, env=env
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-        log_error(f"Claude CLI returned non-zero exit code: {result.returncode}")
-        if result.stderr:
-            log_error(f"Claude CLI stderr: {result.stderr[:500]}")
-        return None
-    except subprocess.TimeoutExpired:
-        log_error("Claude CLI error: process timed out after 300 seconds")
-        return None
-    except (subprocess.SubprocessError, OSError) as e:
-        log_error(f"Claude CLI error: {e}")
-        return None
-
-LLM_PROMPT = "この画像について詳しく説明してください。画像の内容、オブジェクト、色、雰囲気などを含めて説明してください。日本語で回答してください。"
-
 def create_markitdown_instance():
-    """MarkItDownインスタンスを作成する。LLM統合はClaude CLIで別途行う。"""
+    """MarkItDownインスタンスを作成する。"""
     import markitdown
 
     md = markitdown.MarkItDown()
-    log_message('MarkItDownインスタンス作成（LLM統合はClaude CLIで別途実行）')
+    log_message('MarkItDownインスタンス作成完了')
     return md
-
-def summarize_markdown_with_llm(raw_markdown, file_name):
-    """Claude CLIを使ってMarkdownテキストを分析・統計まとめする。"""
-    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
-    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
-    if not node_path or not cli_path:
-        return None
-
-    try:
-        log_message(f'LLMでMarkdown分析開始: {file_name}')
-
-        prompt = (
-            "あなたは文書分析の専門家です。\n"
-            "入力されたMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。\n\n"
-            "【出力構成（この順序で出力すること）】\n"
-            "1. 概要: 文書全体の目的・テーマを2〜3文で説明\n"
-            "2. 統計情報: 文字数、段落数、見出し数、リンク数、画像数、表の数など該当するものを表形式で列挙\n"
-            "3. 文書構造: 見出し階層をツリー形式で表示\n"
-            "4. 主要トピック: 文書内の主要なトピックを箇条書きで列挙し、各トピックの要点を1〜2文で説明\n"
-            "5. キーワード・固有名詞: 文書内で重要なキーワード、固有名詞、数値データを列挙\n"
-            "6. 結論・要点: 文書の結論や最も重要なポイントをまとめる\n\n"
-            "【ルール】\n"
-            "- 必ず日本語で出力する（元のテキストが英語でも日本語に翻訳して出力する）\n"
-            "- 出力はMarkdown形式で整形する\n"
-            "- 情報を省略せず、網羅的かつ詳細に分析・説明する\n"
-            "- 各セクションの内容を具体的に掘り下げ、要点だけでなく詳しい説明を含める\n"
-            "- 分析結果のMarkdownだけを出力する（説明文や前置きは不要）\n\n"
-            "以下のMarkdownテキストを分析し、統計情報と構造化されたまとめを作成してください。"
-        )
-
-        summary = claude_call(prompt, stdin_text=raw_markdown)
-        if summary and len(summary.strip()) > 0:
-            log_message(f'LLM分析完了: {len(raw_markdown)}文字 → {len(summary)}文字')
-            return summary
-        else:
-            log_message('LLMまとめの結果が空でした。')
-            return None
-
-    except (subprocess.SubprocessError, OSError, ValueError) as e:
-        log_error(f'LLMまとめエラー: {e}')
-        return None
-
-
-def refine_markdown_with_llm(raw_markdown, file_name):
-    """Claude CLIを使って崩れたMarkdownテキストを整形する。"""
-    node_path = os.environ.get("CLAUDE_NODE_PATH", "")
-    cli_path = os.environ.get("CLAUDE_CLI_PATH", "")
-    if not node_path or not cli_path:
-        return raw_markdown
-
-    try:
-        log_message(f'LLMでMarkdown整形開始: {file_name}')
-
-        prompt = (
-            "あなたはMarkdown整形アシスタントです。\n"
-            "入力されたMarkdownテキストの書式だけを整えてください。\n\n"
-            "【最重要ルール】\n"
-            "- テキストの内容は一切省略しない。すべての文章・段落・項目をそのまま残すこと\n"
-            "- 要約しない。短くまとめない。文を削除しない。言い換えない\n"
-            "- 出力の文字数は入力とほぼ同じになるはず。大幅に短くなる場合は内容を省略している証拠なので、省略せず全文を出力すること\n"
-            "- 必ず日本語で出力する（元のテキストが英語でも日本語に翻訳して出力する）\n"
-            "- 表（テーブル）データはそのまま維持する\n\n"
-            "【整形で行うこと】\n"
-            "- 不要な連続空行を1行にまとめる\n"
-            "- 壊れたMarkdown記法（閉じ忘れ、不正なリスト等）を修正する\n"
-            "- 見出しレベル（#, ##, ###）の一貫性を保つ\n"
-            "- 整形結果のMarkdownだけを出力する（説明文や前置きは不要）\n\n"
-            "以下のMarkdownテキストの書式を整えてください。内容は変更せず、そのまま維持してください。"
-        )
-
-        refined = claude_call(prompt, stdin_text=raw_markdown)
-        if refined and len(refined.strip()) > 0:
-            log_message(f'LLM整形完了: {len(raw_markdown)}文字 → {len(refined)}文字')
-            return refined
-        else:
-            log_message('LLM整形の結果が空でした。元のテキストを使用します。')
-            return raw_markdown
-
-    except (subprocess.SubprocessError, OSError, ValueError) as e:
-        log_error(f'LLM整形エラー: {e}。元のテキストを使用します。')
-        return raw_markdown
 
 try:
     log_message('Pythonスクリプト開始')
@@ -166,17 +57,8 @@ try:
     app_dir = str(Path(__file__).resolve().parent)
     log_message('Application directory: ' + app_dir)
 
-    # Claude CLI設定を環境変数から取得
-    claude_node_path = os.environ.get('CLAUDE_NODE_PATH', '')
-    claude_cli_path = os.environ.get('CLAUDE_CLI_PATH', '')
-
-    if claude_node_path and claude_cli_path:
-        log_message(f'Claude CLI設定が検出されました: node={claude_node_path}, cli={claude_cli_path}')
-    else:
-        log_message('Claude CLI設定が見つかりません。LLM整形・分析機能は無効です。')
-
     async def process_file_async(md, file_path):
-        """ファイルをMarkItDownで変換する。PDF等の構造化ドキュメントはClaude CLIで整形する。"""
+        """ファイルをMarkItDownで変換する。"""
         try:
             p = Path(file_path)
             file_name = p.name
@@ -211,7 +93,6 @@ try:
                     markdown_content += f"- 拡張子: {file_ext}\n\n"
                     markdown_content += f"![{file_name}]({file_path})\n\n"
                     markdown_content += "注: この画像にはテキスト情報が含まれていないか、OCR処理でテキストが検出されませんでした。\n"
-                    markdown_content += "画像の内容を説明するには、Claude CLI を使用してください。\n"
                     log_message(f'画像ファイル情報を追加しました')
                 else:
                     markdown_content = f"# {file_name}\n\n変換結果が空でした。\n"
@@ -225,25 +106,6 @@ try:
             origin_filename = _write_output_file(
                 markdown_content, name_without_ext, '元データ', timestamp, file_dir
             )
-
-            # 2. 整形済・まとめ済（Claude CLI利用可能時のみ）
-            if (markdown_content and len(markdown_content.strip()) > 0
-                    and claude_node_path and claude_cli_path):
-                formatted_content = await loop.run_in_executor(
-                    None, refine_markdown_with_llm,
-                    markdown_content, file_name
-                )
-                _write_output_file(
-                    formatted_content, name_without_ext, '整形済', timestamp, file_dir
-                )
-
-                summary_content = await loop.run_in_executor(
-                    None, summarize_markdown_with_llm,
-                    markdown_content, file_name
-                )
-                _write_output_file(
-                    summary_content, name_without_ext, 'まとめ済', timestamp, file_dir
-                )
 
             log_message(f'ファイル出力完了: {file_name}')
             return f'変換完了: {file_name} → {origin_filename}'
@@ -296,7 +158,7 @@ try:
             import markitdown
             log_message('MarkItDown library imported successfully')
 
-            # Create a single MarkItDown instance to reuse (LLM統合はClaude CLIで別途実行)
+            # Create a single MarkItDown instance to reuse
             log_message('MarkItDownインスタンスを作成中...')
             try:
                 md = create_markitdown_instance()

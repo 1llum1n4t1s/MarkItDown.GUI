@@ -19,8 +19,6 @@ public sealed class PlaywrightScraperService
     private readonly Action<string> _logError;
     private readonly Action<string>? _statusCallback;
     private bool _dependenciesInstalled;
-    private string? _claudeNodePath;
-    private string? _claudeCliPath;
 
     public PlaywrightScraperService(string pythonExecutablePath, Action<string> logMessage, Action<string>? statusCallback = null, Action<string>? logError = null)
     {
@@ -28,15 +26,6 @@ public sealed class PlaywrightScraperService
         _logMessage = logMessage;
         _logError = logError ?? logMessage;
         _statusCallback = statusCallback;
-    }
-
-    /// <summary>
-    /// Claude Code CLI接続情報を設定する（Pythonスクリプトに環境変数で渡す）
-    /// </summary>
-    public void SetClaudeConfig(string nodePath, string cliJsPath)
-    {
-        _claudeNodePath = nodePath;
-        _claudeCliPath = cliJsPath;
     }
 
     /// <summary>
@@ -96,11 +85,7 @@ public sealed class PlaywrightScraperService
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        // Claude Code CLI 設定を環境変数で渡す
-        if (!string.IsNullOrEmpty(_claudeNodePath))
-            startInfo.Environment["CLAUDE_NODE_PATH"] = _claudeNodePath;
-        if (!string.IsNullOrEmpty(_claudeCliPath))
-            startInfo.Environment["CLAUDE_CLI_PATH"] = _claudeCliPath;
+
 
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(url);
@@ -190,7 +175,7 @@ public sealed class PlaywrightScraperService
 
     /// <summary>
     /// ブラウザを使わない HTTP ベースのスクレイピング。
-    /// requests + BeautifulSoup + Claude ガイド型で処理する。
+    /// requests + BeautifulSoup で処理する。
     /// </summary>
     public async Task ScrapeWithHttpAsync(string url, string outputPath, CancellationToken ct = default)
     {
@@ -217,11 +202,7 @@ public sealed class PlaywrightScraperService
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        // Claude Code CLI 設定を環境変数で渡す
-        if (!string.IsNullOrEmpty(_claudeNodePath))
-            startInfo.Environment["CLAUDE_NODE_PATH"] = _claudeNodePath;
-        if (!string.IsNullOrEmpty(_claudeCliPath))
-            startInfo.Environment["CLAUDE_CLI_PATH"] = _claudeCliPath;
+
 
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(url);
