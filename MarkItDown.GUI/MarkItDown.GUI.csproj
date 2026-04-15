@@ -20,14 +20,13 @@
   <ItemGroup>
     <PackageReference Include="LlmChamber.Avalonia" Version="1.0.0" />
     <PackageReference Include="ActiproSoftware.Controls.Avalonia" Version="26.1.0-rc.1" />
-    <PackageReference Include="Avalonia" Version="12.0.0" />
-    <PackageReference Include="Avalonia.Desktop" Version="12.0.0" />
-    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.0" />
-    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.48" />
-    <PackageReference Include="7z.Libs" Version="26.0.0" />
+    <PackageReference Include="Avalonia" Version="12.0.1" />
+    <PackageReference Include="Avalonia.Desktop" Version="12.0.1" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.1" />
+    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.56" />
+    <PackageReference Include="SuperLightLogger" Version="1.0.4" />
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.92.0" />
     <PackageReference Include="Velopack" Version="0.0.*" />
-    <PackageReference Include="NLog" Version="6.1.2" />
   </ItemGroup>
 
   <!-- Scriptsフォルダを出力ディレクトリにコピー -->
@@ -43,15 +42,17 @@
     <Exec Command="pwsh -ExecutionPolicy Bypass -File &quot;$(MSBuildProjectDirectory)\..\icon\generate_icon.ps1&quot;" ContinueOnError="true" IgnoreExitCode="false" WorkingDirectory="$(MSBuildProjectDirectory)\..\icon" />
   </Target>
 
-  <!-- ビルド/パブリッシュ後に7z.dllをルートに配置 -->
+  <!--
+    ビルド/パブリッシュ後に7z.dllをルートに配置
+    1llum1n4t1s.Sevenzip 1.0.56 以降は Cube.Native.SevenZip 依存を廃止し、
+    パッケージ自身が runtimes/win-x64/native/7z.dll を vendor する仕様に変更。
+    そのため x64\ / x86\ サブフォルダ経由のコピー (旧 7z.Libs 由来) は不要になった。
+  -->
   <Target Name="MoveNativeDllsToRoot" AfterTargets="Build;Publish">
-    <!-- 7z.dllを複数の場所から確認して移動 -->
-    <Move SourceFiles="$(OutputPath)x64\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)x64\7z.dll')" ContinueOnError="true" />
-    <Move SourceFiles="$(OutputPath)runtimes\win-x64\native\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)runtimes\win-x64\native\7z.dll')" ContinueOnError="true" />
-
-    <!-- クリーンアップ -->
-    <RemoveDir Directories="$(OutputPath)x64" Condition="Exists('$(OutputPath)x64')" ContinueOnError="true" />
-    <RemoveDir Directories="$(OutputPath)x86" Condition="Exists('$(OutputPath)x86')" ContinueOnError="true" />
+    <Move SourceFiles="$(OutputPath)runtimes\win-x64\native\7z.dll"
+          DestinationFiles="$(OutputPath)7z.dll"
+          Condition="Exists('$(OutputPath)runtimes\win-x64\native\7z.dll')"
+          ContinueOnError="true" />
 
     <!-- 成功したかログ出力 -->
     <Message Text="7z.dll is at: $(OutputPath)7z.dll" Importance="high" Condition="Exists('$(OutputPath)7z.dll')" />

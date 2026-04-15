@@ -2,9 +2,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using NLog;
-using NLog.Config;
-using NLog.Targets;
+using SuperLightLogger;
 
 namespace MarkItDown.GUI.Services;
 
@@ -41,11 +39,11 @@ public sealed class LoggerConfig
 }
 
 /// <summary>
-/// NLogを使用した汎用ログ出力クラス
+/// SuperLightLoggerを使用した汎用ログ出力クラス
 /// </summary>
 public static class Logger
 {
-    private static NLog.Logger? _logger;
+    private static ILog? _logger;
     private static bool _isConfigured;
     private static string _appName = "MarkItDown.GUI";
 
@@ -109,34 +107,31 @@ public static class Logger
             }
         }
 
-        var nlogConfig = new LoggingConfiguration();
-
-        var fileTarget = new FileTarget("file")
+        // SuperLightLogger を構成（GUI アプリなので File Target のみ）
+        LogManager.Configure(builder =>
         {
-            FileName = Path.Combine(config.LogDirectory, $"{config.FilePrefix}_${{date:format=yyyyMMdd}}.log"),
-            ArchiveAboveSize = config.MaxSizeMB * 1024 * 1024,
-            ArchiveFileName = Path.Combine(config.LogDirectory, $"{config.FilePrefix}_${{date:format=yyyyMMdd}}_{{##}}.log"),
-            MaxArchiveFiles = config.MaxArchiveFiles,
-            Layout = "${longdate} [${uppercase:${level}}] ${message}${onexception:inner=${newline}${exception:format=tostring}}",
-            Encoding = System.Text.Encoding.UTF8
-        };
+            builder.AddSuperLightFile(opt =>
+            {
+                opt.FileName = Path.Combine(
+                    config.LogDirectory,
+                    $"{config.FilePrefix}_${{date:format=yyyyMMdd}}.log");
+                opt.ArchiveFileName = Path.Combine(
+                    config.LogDirectory,
+                    $"{config.FilePrefix}_${{date:format=yyyyMMdd}}_{{#}}.log");
+                opt.ArchiveAboveSize = config.MaxSizeMB * 1024L * 1024L;
+                opt.MaxArchiveFiles = config.MaxArchiveFiles;
+                opt.ArchiveNumbering = ArchiveNumbering.Sequence;
+                opt.Layout = "${longdate} [${level:uppercase=true}] ${message}${onexception:${newline}${exception:format=tostring}}";
+                opt.Encoding = System.Text.Encoding.UTF8;
+                opt.MinLevelName = "Trace";
+            });
+            builder.SetMinimumLevel("Trace");
+        });
 
-        var consoleTarget = new ConsoleTarget("console")
-        {
-            Layout = "${longdate} [${uppercase:${level}}] ${message}${onexception:inner=${newline}${exception:format=tostring}}"
-        };
-
-        nlogConfig.AddTarget(fileTarget);
-        nlogConfig.AddTarget(consoleTarget);
-
-        nlogConfig.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, fileTarget);
-        nlogConfig.AddRule(NLog.LogLevel.Trace, NLog.LogLevel.Fatal, consoleTarget);
-
-        LogManager.Configuration = nlogConfig;
         _logger = LogManager.GetLogger(config.FilePrefix);
         _isConfigured = true;
 
-        Log("Logger initialized with NLog (RollingFile)", LogLevel.Debug);
+        Log("Logger initialized with SuperLightLogger (File Target)", LogLevel.Debug);
 
         // 保持期間を超えた古いログファイルを削除
         CleanupOldLogFiles(config.LogDirectory, config.FilePrefix, config.RetentionDays);
@@ -152,7 +147,7 @@ public static class Logger
         if (level < MinLogLevel)
             return;
 
-        _logger?.Log(ToNLogLevel(level), message);
+        WriteLog(message, level);
     }
 
     /// <summary>
@@ -165,10 +160,9 @@ public static class Logger
         if (messages is null || messages.Length == 0) return;
         if (level < MinLogLevel) return;
 
-        var nlogLevel = ToNLogLevel(level);
         foreach (var message in messages)
         {
-            _logger?.Log(nlogLevel, message);
+            WriteLog(message, level);
         }
     }
 
@@ -179,7 +173,8 @@ public static class Logger
     /// <param name="exception">例外オブジェクト</param>
     public static void LogException(string message, Exception exception)
     {
-        _logger?.Error(exception, message);
+        // SuperLightLogger (log4net互換) の引数順は (message, exception)
+        _logger?.Error(message, exception);
     }
 
     /// <summary>
@@ -259,14 +254,29 @@ public static class Logger
     }
 
     /// <summary>
-    /// 独自LogLevelをNLogのLogLevelに変換
+    /// 独自LogLevelをSuperLightLoggerの対応メソッドに振り分ける
     /// </summary>
-    private static NLog.LogLevel ToNLogLevel(LogLevel level) => level switch
+    private static void WriteLog(string message, LogLevel level)
     {
-        LogLevel.Debug => NLog.LogLevel.Debug,
-        LogLevel.Info => NLog.LogLevel.Info,
-        LogLevel.Warning => NLog.LogLevel.Warn,
-        LogLevel.Error => NLog.LogLevel.Error,
-        _ => NLog.LogLevel.Info
-    };
+        if (_logger is null) return;
+
+        switch (level)
+        {
+            case LogLevel.Debug:
+                _logger.Debug(message);
+                break;
+            case LogLevel.Info:
+                _logger.Info(message);
+                break;
+            case LogLevel.Warning:
+                _logger.Warn(message);
+                break;
+            case LogLevel.Error:
+                _logger.Error(message);
+                break;
+            default:
+                _logger.Info(message);
+                break;
+        }
+    }
 }
