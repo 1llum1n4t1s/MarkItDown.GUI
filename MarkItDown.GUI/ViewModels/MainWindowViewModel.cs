@@ -206,17 +206,12 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             // LLMインスタンスを先に生成してサービスに渡す（DLはバックグラウンドで実行）
             PrepareLlmInstance();
 
-            // ローカルLLM の初期化（DL含む）をバックグラウンドで実行（UIをブロックしない）
-            _ = SetupLlmAsync().ContinueWith(t =>
-            {
-                if (t.IsFaulted && t.Exception is not null)
-                {
-                    LogMessage($"LLMバックグラウンド初期化で未処理エラーなのだ: {t.Exception.InnerException?.Message}", LogLevel.Error);
-                }
-            }, TaskContinuationOptions.OnlyOnFaulted);
+            // ローカルLLM の初期化（Ollama ランタイム DL + Gemma モデル pull）
+            // ダウンロード完了まで操作ブロック用オーバーレイを維持する
+            await SetupLlmAsync();
 
             UpdateProcessingStatus("初期化完了");
-            LogMessage("すべての初期化が完了したのだ！（LLMはバックグラウンドで準備中）");
+            LogMessage("すべての初期化が完了したのだ！");
         }
         catch (Exception ex)
         {

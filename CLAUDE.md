@@ -26,17 +26,17 @@ dotnet publish MarkItDown.GUI/MarkItDown.GUI.csproj -c Release -o artifacts/publ
 
 ### エントリポイントの流れ（Program.cs）
 
-1. `VelopackApp.Build().Run()` — Velopackフック処理（install/update/uninstallコールバック）
-2. `--update-check` 引数あり → `RunSilentUpdateCheck()` でサイレント更新チェック後に終了
-3. Mutex で多重起動防止
-4. Logger/AppSettings 初期化 → Avalonia起動
+1. `VelopackApp.Build().Run()` — Velopackフック処理（更新適用後の再起動、旧スタートアップ登録の掃除）
+2. Mutex で多重起動防止
+3. Logger/AppSettings 初期化 → Avalonia起動
+4. `App.OnFrameworkInitializationCompleted()` でバックグラウンド更新チェック（`CheckForUpdateInBackground()`）
 
 ### ディレクトリ構成（重要なもの）
 
 ```
 MarkItDown.GUI/
-├── Program.cs              # エントリポイント、Velopack統合、サイレント更新
-├── App.axaml.cs            # ライフサイクル管理、リソースクリーンアップ
+├── Program.cs              # エントリポイント、Velopack統合
+├── App.axaml.cs            # ライフサイクル管理、リソースクリーンアップ、起動時更新チェック
 ├── MainWindow.axaml(.cs)   # UI定義、ドラッグ&ドロップ
 ├── ViewModels/
 │   ├── ViewModelBase.cs    # INotifyPropertyChanged基底クラス
@@ -44,8 +44,7 @@ MarkItDown.GUI/
 ├── Services/
 │   ├── AppSettings.cs          # XML設定（%LOCALAPPDATA%/MarkItDown.GUI/appsettings.xml）
 │   ├── AppPathHelper.cs        # パス解決（Velopack環境 vs 開発環境の自動判定）
-│   ├── Logger.cs               # NLogラッパー（Release時はWarning以上のみ出力）
-│   ├── StartupRegistration.cs  # レジストリRunキーでWindows起動時更新チェック登録
+│   ├── Logger.cs               # SuperLightLoggerラッパー（Release時はWarning以上のみ出力）
 │   ├── PythonEnvironmentManager.cs  # 埋め込みPythonのDL/セットアップ
 │   ├── PythonPackageManager.cs      # pipパッケージ管理
 │   ├── FfmpegManager.cs            # FFmpegのDL/セットアップ
@@ -68,8 +67,8 @@ MarkItDown.GUI/
   - `lib/` — Python/FFmpeg/Node.js（更新で消えない）
   - `appsettings.xml` — 設定（更新で消えない）
 - **更新ソース**: GitHub Releases（`1llum1n4t1s/MarkItDown.GUI`）
-- **起動時チェック**: レジストリ `HKCU\...\Run` → `MarkItDown.GUI.exe --update-check`
-- Velopackフック: install後/update後に`StartupRegistration.Register()`、uninstall前に`Unregister()`
+- **更新チェック**: アプリ起動時に `App.CheckForUpdateInBackground()` でバックグラウンド実行。更新があれば自動DL→再起動適用
+- Velopackフック: update後に旧スタートアップ Run キーを掃除（1.0.72以前の移行対応）
 
 ### パス解決の注意点（AppPathHelper）
 

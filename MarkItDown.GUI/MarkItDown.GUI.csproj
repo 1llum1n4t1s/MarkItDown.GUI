@@ -6,7 +6,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <LangVersion>14</LangVersion>
     <Nullable>enable</Nullable>
-    <Version>1.0.72</Version>
+    <Version>1.0.73</Version>
     <Authors>ゆろち</Authors>
     <Title>MarkItDown.GUI</Title>
     <ApplicationIcon>..\icon\app.ico</ApplicationIcon>
@@ -18,13 +18,13 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="LlmChamber.Avalonia" Version="1.0.0" />
+    <PackageReference Include="LlmChamber.Avalonia" Version="1.0.2" />
     <PackageReference Include="ActiproSoftware.Controls.Avalonia" Version="26.1.0-rc.1" />
     <PackageReference Include="Avalonia" Version="12.0.1" />
     <PackageReference Include="Avalonia.Desktop" Version="12.0.1" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="12.0.1" />
-    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.56" />
-    <PackageReference Include="SuperLightLogger" Version="1.0.4" />
+    <PackageReference Include="1llum1n4t1s.Sevenzip" Version="1.0.66" />
+    <PackageReference Include="SuperLightLogger" Version="1.0.6" />
     <PackageReference Include="Tmds.DBus.Protocol" Version="0.92.0" />
     <PackageReference Include="Velopack" Version="0.0.*" />
   </ItemGroup>
@@ -49,10 +49,7 @@
     そのため x64\ / x86\ サブフォルダ経由のコピー (旧 7z.Libs 由来) は不要になった。
   -->
   <Target Name="MoveNativeDllsToRoot" AfterTargets="Build;Publish">
-    <Move SourceFiles="$(OutputPath)runtimes\win-x64\native\7z.dll"
-          DestinationFiles="$(OutputPath)7z.dll"
-          Condition="Exists('$(OutputPath)runtimes\win-x64\native\7z.dll')"
-          ContinueOnError="true" />
+    <Move SourceFiles="$(OutputPath)runtimes\win-x64\native\7z.dll" DestinationFiles="$(OutputPath)7z.dll" Condition="Exists('$(OutputPath)runtimes\win-x64\native\7z.dll')" ContinueOnError="true" />
 
     <!-- 成功したかログ出力 -->
     <Message Text="7z.dll is at: $(OutputPath)7z.dll" Importance="high" Condition="Exists('$(OutputPath)7z.dll')" />
