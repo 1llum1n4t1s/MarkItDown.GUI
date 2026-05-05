@@ -146,7 +146,7 @@ public class PythonPackageManager
             startInfo.ArgumentList.Add("-m");
             startInfo.ArgumentList.Add("pip");
             startInfo.ArgumentList.Add("install");
-            startInfo.ArgumentList.Add("--upgrade");
+            startInfo.ArgumentList.Add("--disable-pip-version-check");
             startInfo.ArgumentList.Add(packageName);
 
             var (exitCode, output, error) = await ProcessUtils.RunAsync(
@@ -194,7 +194,8 @@ public class PythonPackageManager
             }
             else
             {
-                _logMessage($"markitdown {currentVersion} がインストール済みなのだ。最新バージョンを確認中なのだ...");
+                _logMessage($"markitdown {currentVersion} がインストール済みなのだ。通常起動では更新せず、この環境をそのまま使うのだ。");
+                return;
             }
 
             await InstallMarkItDownWithPipAsync(ct);
@@ -302,7 +303,6 @@ public class PythonPackageManager
             // 1. extras 依存パッケージを先にインストール（markitdown[all] の依存群）
             _logMessage("markitdownの依存パッケージをインストール中なのだ...");
             await RunPipInstallAsync(ct,
-                "--upgrade",
                 "magika>=0.6.1",
                 "beautifulsoup4", "charset-normalizer", "defusedxml", "markdownify",
                 "requests", "lxml", "mammoth", "olefile", "openpyxl", "pandas",
@@ -311,13 +311,13 @@ public class PythonPackageManager
                 "numpy", "azure-ai-documentintelligence", "azure-identity");
             _logMessage("markitdownの依存パッケージのインストールが完了したのだ。");
 
-            // 2. markitdown 本体を --upgrade --no-deps で最新版をインストール
+            // 2. markitdown 本体を --no-deps でインストール
             //    （onnxruntime<=1.20.1 制約を回避するため）
-            _logMessage("markitdown最新版をインストール中なのだ...");
+            _logMessage("markitdownをインストール中なのだ...");
             await RunPipInstallAsync(ct,
-                "--upgrade", "--no-deps",
+                "--no-deps",
                 "markitdown");
-            _logMessage("markitdown最新版のインストールが完了したのだ。");
+            _logMessage("markitdownのインストールが完了したのだ。");
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -356,6 +356,7 @@ public class PythonPackageManager
         startInfo.ArgumentList.Add("-m");
         startInfo.ArgumentList.Add("pip");
         startInfo.ArgumentList.Add("install");
+        startInfo.ArgumentList.Add("--disable-pip-version-check");
         foreach (var arg in args)
             startInfo.ArgumentList.Add(arg);
 

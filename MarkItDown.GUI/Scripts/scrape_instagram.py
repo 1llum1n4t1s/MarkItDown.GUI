@@ -27,9 +27,21 @@ import json
 import os
 import random
 import sys
+import atexit
+import tempfile
 import time
 import traceback
 from pathlib import Path
+
+
+def _env_flag(name: str) -> bool:
+    """環境変数の真偽値を安全に読む。"""
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allow_session_persistence() -> bool:
+    """SNSセッションをディスクへ永続保存してよいか。"""
+    return _env_flag("MARKITDOWN_SOCIAL_SESSION_PERSIST")
 
 
 def log(msg: str):
@@ -103,6 +115,10 @@ def _setup_instaloader():
 
 def _try_load_session(L, session_dir: str) -> str | None:
     """保存済みセッションの読み込みを試みる。成功すればユーザー名を返す。"""
+    if not _allow_session_persistence():
+        log("Instagramセッション永続保存は無効なのだ。保存済みログイン情報は読み込まないのだ。")
+        return None
+
     ig_username = _load_session_info(session_dir)
     if not ig_username:
         log("保存済みのログイン情報が見つからないのだ。")
@@ -308,12 +324,15 @@ def _apply_cookies_to_instaloader(L, cookies: dict[str, str], session_dir: str) 
     test_user = L.test_login()
     if test_user:
         log(f"ChromeからInstaloaderへのセッション転送に成功: ユーザー = {test_user}")
-        # セッションを保存（次回以降はPlaywright不要の可能性あり）
-        session_file = _get_session_file(session_dir, test_user)
         L.context.username = test_user
-        L.save_session_to_file(session_file)
-        _save_session_info(session_dir, test_user)
-        log("Instaloaderセッションを保存したのだ。")
+        if _allow_session_persistence():
+            # セッションを保存（次回以降はPlaywright不要の可能性あり）
+            session_file = _get_session_file(session_dir, test_user)
+            L.save_session_to_file(session_file)
+            _save_session_info(session_dir, test_user)
+            log("Instaloaderセッションを保護された保存先へ保存したのだ。")
+        else:
+            log("Instaloaderセッションは永続保存せず、今回限りで使うのだ。")
         return test_user
     else:
         log("CookieをセットしたがInstaloaderのセッション検証に失敗したのだ。")
@@ -524,8 +543,14 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
     log(f"出力先: {output_dir}")
 
+    temp_session_dir = None
     session_dir = os.environ.get("IG_SESSION_DIR", "")
-    if not session_dir:
+    if not _allow_session_persistence():
+        temp_session_dir = tempfile.TemporaryDirectory(prefix="markitdown_ig_session_")
+        atexit.register(temp_session_dir.cleanup)
+        session_dir = temp_session_dir.name
+        log("Instagramセッション永続保存は無効なのだ。一時プロファイルで実行するのだ。")
+    elif not session_dir:
         session_dir = os.path.join(os.getcwd(), "lib", "playwright", "instagram_session")
     os.makedirs(session_dir, exist_ok=True)
 

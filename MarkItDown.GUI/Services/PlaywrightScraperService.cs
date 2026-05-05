@@ -18,19 +18,26 @@ public sealed class PlaywrightScraperService
     private readonly Action<string> _logMessage;
     private readonly Action<string> _logError;
     private readonly Action<string>? _statusCallback;
+    private readonly bool _allowSocialSessionPersistence;
     private bool _dependenciesInstalled;
 
-    public PlaywrightScraperService(string pythonExecutablePath, Action<string> logMessage, Action<string>? statusCallback = null, Action<string>? logError = null)
+    public PlaywrightScraperService(
+        string pythonExecutablePath,
+        Action<string> logMessage,
+        Action<string>? statusCallback = null,
+        Action<string>? logError = null,
+        bool allowSocialSessionPersistence = false)
     {
         _pythonExecutablePath = pythonExecutablePath;
         _logMessage = logMessage;
         _logError = logError ?? logMessage;
         _statusCallback = statusCallback;
+        _allowSocialSessionPersistence = allowSocialSessionPersistence;
     }
 
     /// <summary>
     /// 必要な Python パッケージ (playwright) がインストールされているかチェックし、
-    /// なければインストール、あれば最新バージョンに更新する
+    /// なければインストールする。通常実行時の自動更新は行わない。
     /// </summary>
     public async Task EnsureDependenciesInstalledAsync(CancellationToken ct = default)
     {
@@ -38,16 +45,15 @@ public sealed class PlaywrightScraperService
 
         _statusCallback?.Invoke("依存パッケージを確認中...");
 
-        // playwright パッケージチェック・更新
         if (!await CheckPackageInstalledAsync("playwright", ct).ConfigureAwait(false))
         {
             _logMessage("playwright パッケージをインストール中なのだ...");
+            await InstallPackageAsync("playwright", ct).ConfigureAwait(false);
         }
         else
         {
-            _logMessage("playwright パッケージの最新バージョンを確認中なのだ...");
+            _logMessage("playwright パッケージはインストール済みなのだ。通常実行では更新しないのだ。");
         }
-        await InstallPackageAsync("playwright", ct).ConfigureAwait(false);
 
         _dependenciesInstalled = true;
     }
@@ -296,8 +302,8 @@ public sealed class PlaywrightScraperService
             await InstallPackageAsync("httpx", ct).ConfigureAwait(false);
         }
 
-        // browser-cookie3 パッケージの追加インストール（通常ChromeのCookie取り込み用）
-        if (!await CheckPackageInstalledAsync("browser_cookie3", ct).ConfigureAwait(false))
+        // browser-cookie3 はブラウザCookie取り込みを明示許可した場合だけ使用する
+        if (_allowSocialSessionPersistence && !await CheckPackageInstalledAsync("browser_cookie3", ct).ConfigureAwait(false))
         {
             _logMessage("browser-cookie3 パッケージをインストール中なのだ...");
             await InstallPackageAsync("browser-cookie3", ct).ConfigureAwait(false);
@@ -326,9 +332,24 @@ public sealed class PlaywrightScraperService
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        // セッションファイルパスを環境変数で渡す
-        var sessionPath = Path.Combine(appDir, "lib", "playwright", "x_session.json");
-        startInfo.Environment["X_SESSION_PATH"] = sessionPath;
+        string? sessionDir = null;
+        string? sessionPath = null;
+        startInfo.Environment["MARKITDOWN_SOCIAL_SESSION_PERSIST"] = _allowSocialSessionPersistence ? "1" : "0";
+        startInfo.Environment["MARKITDOWN_BROWSER_COOKIE_IMPORT"] = _allowSocialSessionPersistence ? "1" : "0";
+
+        if (_allowSocialSessionPersistence)
+        {
+            sessionDir = Path.Combine(AppPathHelper.LibDirectory, "playwright", "x_session");
+            await SocialSessionStorage.PreparePersistentDirectoryAsync(sessionDir, _logMessage, ct).ConfigureAwait(false);
+            sessionPath = Path.Combine(sessionDir, "x_session.json");
+            startInfo.Environment["X_SESSION_PATH"] = sessionPath;
+            _logMessage("X.comセッションの永続保存が有効なのだ。保存先ACLを制限したのだ。");
+        }
+        else
+        {
+            SocialSessionStorage.DeleteKnownPersistentSessions(_logMessage, _logError);
+            _logMessage("X.comセッションは永続保存しない設定なのだ。ブラウザCookie取り込みも無効なのだ。");
+        }
 
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(username);
@@ -403,7 +424,6 @@ public sealed class PlaywrightScraperService
         if (process.ExitCode == 3)
         {
             // セッション切れ: プロファイルディレクトリを削除
-            var sessionDir = Path.GetDirectoryName(sessionPath);
             if (sessionDir is null)
             {
                 throw new InvalidOperationException(
@@ -439,27 +459,25 @@ public sealed class PlaywrightScraperService
     {
         await EnsureDependenciesInstalledAsync(ct).ConfigureAwait(false);
 
-        // openai パッケージの追加インストール
         if (!await CheckPackageInstalledAsync("openai", ct).ConfigureAwait(false))
         {
             _logMessage("openai パッケージをインストール中なのだ...");
+            await InstallPackageAsync("openai", ct).ConfigureAwait(false);
         }
         else
         {
-            _logMessage("openai パッケージの最新バージョンを確認中なのだ...");
+            _logMessage("openai パッケージはインストール済みなのだ。通常実行では更新しないのだ。");
         }
-        await InstallPackageAsync("openai", ct).ConfigureAwait(false);
 
-        // instaloader パッケージの追加インストール
         if (!await CheckPackageInstalledAsync("instaloader", ct).ConfigureAwait(false))
         {
             _logMessage("instaloader パッケージをインストール中なのだ...");
+            await InstallPackageAsync("instaloader", ct).ConfigureAwait(false);
         }
         else
         {
-            _logMessage("instaloader パッケージの最新バージョンを確認中なのだ...");
+            _logMessage("instaloader パッケージはインストール済みなのだ。通常実行では更新しないのだ。");
         }
-        await InstallPackageAsync("instaloader", ct).ConfigureAwait(false);
 
         var appDir = Directory.GetCurrentDirectory();
         var scriptPath = Path.Combine(appDir, "Scripts", "scrape_instagram.py");
@@ -484,9 +502,21 @@ public sealed class PlaywrightScraperService
             StandardErrorEncoding = Encoding.UTF8
         };
 
-        // セッションディレクトリを環境変数で渡す
-        var sessionDir = Path.Combine(appDir, "lib", "playwright", "instagram_session");
-        startInfo.Environment["IG_SESSION_DIR"] = sessionDir;
+        string? sessionDir = null;
+        startInfo.Environment["MARKITDOWN_SOCIAL_SESSION_PERSIST"] = _allowSocialSessionPersistence ? "1" : "0";
+
+        if (_allowSocialSessionPersistence)
+        {
+            sessionDir = Path.Combine(AppPathHelper.LibDirectory, "playwright", "instagram_session");
+            await SocialSessionStorage.PreparePersistentDirectoryAsync(sessionDir, _logMessage, ct).ConfigureAwait(false);
+            startInfo.Environment["IG_SESSION_DIR"] = sessionDir;
+            _logMessage("Instagramセッションの永続保存が有効なのだ。保存先ACLを制限したのだ。");
+        }
+        else
+        {
+            SocialSessionStorage.DeleteKnownPersistentSessions(_logMessage, _logError);
+            _logMessage("Instagramセッションは永続保存しない設定なのだ。");
+        }
 
         startInfo.ArgumentList.Add(scriptPath);
         startInfo.ArgumentList.Add(username);
@@ -560,7 +590,7 @@ public sealed class PlaywrightScraperService
             // セッション切れ: セッション関連ファイルを削除
             try
             {
-                if (Directory.Exists(sessionDir))
+                if (sessionDir is not null && Directory.Exists(sessionDir))
                     Directory.Delete(sessionDir, true);
             }
             catch { /* 削除失敗は無視 */ }
@@ -616,7 +646,7 @@ public sealed class PlaywrightScraperService
         startInfo.ArgumentList.Add("-m");
         startInfo.ArgumentList.Add("pip");
         startInfo.ArgumentList.Add("install");
-        startInfo.ArgumentList.Add("--upgrade");
+        startInfo.ArgumentList.Add("--disable-pip-version-check");
         startInfo.ArgumentList.Add(packageName);
 
         var (exitCode, output, error) = await ProcessUtils.RunAsync(
@@ -628,9 +658,9 @@ public sealed class PlaywrightScraperService
             _logError($"pip エラー: {error.TrimEnd()}");
 
         if (exitCode == 0)
-            _logMessage($"{packageName} のインストール/更新完了なのだ");
+            _logMessage($"{packageName} のインストール完了なのだ");
         else
-            _logError($"{packageName} のインストール/更新に失敗したのだ");
+            _logError($"{packageName} のインストールに失敗したのだ");
     }
 
     // ────────────────────────────────────────────

@@ -149,11 +149,31 @@ public partial class App : Application
 
                 Logger.Log($"新しいバージョンを検出: {updateInfo.TargetFullRelease.Version}", LogLevel.Info);
 
+                if (AppActivityTracker.IsBusy)
+                {
+                    Logger.Log("変換・スクレイピング・依存準備中のため、更新適用は次回起動へ延期します。", LogLevel.Warning);
+                    return;
+                }
+
                 using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(10));
                 await mgr.DownloadUpdatesAsync(updateInfo, cancelToken: cts.Token);
 
+                if (!AppActivityTracker.TryReserveRestart())
+                {
+                    Logger.Log("処理中になったため、更新の再起動適用は次回起動へ延期します。", LogLevel.Warning);
+                    return;
+                }
+
                 Logger.Log("更新ダウンロード完了。再起動して適用します。", LogLevel.Info);
-                mgr.ApplyUpdatesAndRestart(updateInfo);
+                try
+                {
+                    mgr.ApplyUpdatesAndRestart(updateInfo);
+                }
+                catch
+                {
+                    AppActivityTracker.CancelReservedRestart();
+                    throw;
+                }
             }
             catch (Exception ex)
             {

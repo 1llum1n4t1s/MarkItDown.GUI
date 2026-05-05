@@ -21,6 +21,7 @@ import os
 import random
 import re
 import sys
+import tempfile
 import time
 import traceback
 from datetime import datetime, timezone
@@ -29,6 +30,21 @@ from urllib.parse import quote, urlparse, parse_qs, urlencode
 
 # リトライ回数の定数
 MAX_RELOAD_ATTEMPTS = 5  # 再検索後のツイート要素検出の最大リトライ回数
+
+def _env_flag(name: str) -> bool:
+    """環境変数の真偽値を安全に読む。"""
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allow_session_persistence() -> bool:
+    """SNSセッションをディスクへ永続保存してよいか。"""
+    return _env_flag("MARKITDOWN_SOCIAL_SESSION_PERSIST")
+
+
+def _allow_browser_cookie_import() -> bool:
+    """通常ブラウザのCookieを取り込んでよいか。"""
+    return _env_flag("MARKITDOWN_BROWSER_COOKIE_IMPORT")
+
 
 def log(msg: str):
     """タイムスタンプ付きログ出力（C#側でアイドルタイムアウトをリセットする）"""
@@ -105,6 +121,10 @@ def _inject_browser_cookies(context) -> bool:
     通常ブラウザの Cookie を Playwright context に注入する。
     成功時は True を返す。
     """
+    if not _allow_browser_cookie_import():
+        log("通常ブラウザCookie取り込みは明示許可されていないためスキップするのだ。")
+        return False
+
     cookies = _load_browser_cookies()
     if not cookies:
         log("通常ブラウザのX Cookieを取得できなかったのだ。")
@@ -397,7 +417,7 @@ def ensure_login(playwright_module, session_path: str) -> tuple:
     context = _launch_persistent(playwright_module, user_data_dir, headless=False)
     page = context.pages[0] if context.pages else context.new_page()
 
-    # 既存プロファイルが未ログインの場合に備え、通常ブラウザCookieを先に注入する
+    # 既存プロファイルが未ログインの場合に備え、許可時だけ通常ブラウザCookieを先に注入する
     _inject_browser_cookies(context)
 
     page.goto("https://x.com/home", wait_until="domcontentloaded", timeout=30000)
@@ -409,10 +429,9 @@ def ensure_login(playwright_module, session_path: str) -> tuple:
 
     # 未ログイン → そのまま headed で手動ログイン待ち
     log_error("未ログイン状態なのだ。")
-    log_error("対処法: 通常のChromeブラウザで x.com にログインしてから再実行してください。")
-    log_error("このスクリプトは通常ブラウザCookieを自動取り込みしてログインを復元するのだ。")
+    log("手動ログイン待機に切り替えるのだ。")
     context.close()
-    sys.exit(3)
+    return _manual_login(playwright_module, user_data_dir)
 
 
 def _manual_login(playwright_module, user_data_dir: str) -> tuple:
@@ -476,7 +495,10 @@ def _manual_login(playwright_module, user_data_dir: str) -> tuple:
         context.close()
         sys.exit(1)
 
-    log("ログイン成功！セッションはプロファイルに自動保存されるのだ。")
+    if _allow_session_persistence():
+        log("ログイン成功！セッションは保護されたプロファイルに保存されるのだ。")
+    else:
+        log("ログイン成功！セッションは今回限りの一時プロファイルに保存され、終了時に破棄されるのだ。")
 
     # そのまま headed で続行（BOT検知回避のため headless に切り替えない）
     return context, page
@@ -904,8 +926,13 @@ def main():
     os.makedirs(user_output_dir, exist_ok=True)
     log(f"出力先: {user_output_dir}")
 
+    temp_session_dir = None
     session_path = os.environ.get("X_SESSION_PATH", "")
-    if not session_path:
+    if not _allow_session_persistence():
+        temp_session_dir = tempfile.TemporaryDirectory(prefix="markitdown_x_session_")
+        session_path = os.path.join(temp_session_dir.name, "x_session.json")
+        log("X.comセッション永続保存は無効なのだ。一時プロファイルで実行するのだ。")
+    elif not session_path:
         session_path = os.path.join(os.getcwd(), "lib", "playwright", "x_session.json")
 
     from playwright.sync_api import sync_playwright
@@ -962,6 +989,9 @@ def main():
                 playwright_instance.stop()
             except (RuntimeError, OSError) as e:
                 log_error(f"Playwrightの停止中にエラーが発生したのだ: {e}")
+        if temp_session_dir is not None:
+            temp_session_dir.cleanup()
+            log("一時X.comセッションを破棄したのだ。")
 
 
 if __name__ == "__main__":

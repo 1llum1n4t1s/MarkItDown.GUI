@@ -2,6 +2,10 @@
 .vs/
 .vscode/
 .claude/
+.codex/
+.serena/
+.mcp.json
+__pycache__/
 *.csproj.user
 *.suo
 bin/

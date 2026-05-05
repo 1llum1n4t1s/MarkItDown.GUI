@@ -22,6 +22,9 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     private WebScraperService? _webScraperService;
     private ILocalLlm? _llm;
     private bool _isProcessing;
+    private readonly object _processingGate = new();
+    private bool _isUserOperationRunning;
+    private IDisposable? _currentUserOperationScope;
     private string _processingTitle = string.Empty;
     private string _processingStatus = string.Empty;
     private double _downloadProgress;
@@ -151,6 +154,8 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     /// </summary>
     private async Task InitializeManagersAsync()
     {
+        using var initActivity = AppActivityTracker.BeginBusyScope();
+
         try
         {
             // 設定ファイルを最初に読み込み
@@ -199,19 +204,23 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             _fileProcessor = new FileProcessor(_markItDownProcessor, LogMessage, logError: LogError);
 
             _webScraperService = new WebScraperService(LogMessage, UpdateProcessingStatus, logError: LogError);
-            var playwrightScraper = new PlaywrightScraperService(pythonExe, LogMessage, UpdateProcessingStatus, logError: LogError);
+            var playwrightScraper = new PlaywrightScraperService(
+                pythonExe,
+                LogMessage,
+                UpdateProcessingStatus,
+                logError: LogError,
+                allowSocialSessionPersistence: AppSettings.GetAllowSocialSessionPersistence());
 
             _webScraperService.SetPlaywrightScraper(playwrightScraper);
 
             // LLMインスタンスを先に生成してサービスに渡す（DLはバックグラウンドで実行）
             PrepareLlmInstance();
 
-            // ローカルLLM の初期化（Ollama ランタイム DL + Gemma モデル pull）
-            // ダウンロード完了まで操作ブロック用オーバーレイを維持する
-            await SetupLlmAsync();
+            // ローカルLLM の初期化はバックグラウンドで続行し、ファイル変換の利用開始を塞がない。
+            StartLlmSetupInBackground();
 
             UpdateProcessingStatus("初期化完了");
-            LogMessage("すべての初期化が完了したのだ！");
+            LogMessage("基本機能の初期化が完了したのだ！ LLMセットアップはバックグラウンドで続行するのだ。");
         }
         catch (Exception ex)
         {
@@ -233,20 +242,11 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     {
         try
         {
-            // AMD GPU 環境では Vulkan バックエンドを使用する
-            // Full版にはROCm DLLが含まれないため、Vulkan経由でGPUを利用
-            // NVIDIA環境ではCUDA自動検出に任せる
-            if (IsAmdGpuPresent())
-            {
-                Environment.SetEnvironmentVariable("OLLAMA_GPU_BACKEND", "vulkan");
-                LogMessage("AMD GPU を検出したのだ。Vulkan バックエンドを使用するのだ。");
-            }
-
             _llm = LlmChamberFactory.Create(opt =>
             {
                 opt.DefaultModel = "gemma4-e4b";
                 opt.CacheDirectory = Path.Combine(AppPathHelper.LibDirectory, "ollama");
-                opt.RuntimeVariant = RuntimeVariant.Full;
+                opt.RuntimeVariant = RuntimeVariant.Auto;
             });
 
             _llm.RuntimeDownloadProgress += (_, e) =>
@@ -303,6 +303,30 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             LogMessage($"ローカルLLM セットアップ中にエラーなのだ: {ex.Message}", LogLevel.Error);
             Logger.LogException("ローカルLLM セットアップ中にエラーが発生しました", ex);
         }
+    }
+
+    /// <summary>
+    /// ローカルLLMの重いセットアップをUI初期化から切り離して実行する。
+    /// </summary>
+    private void StartLlmSetupInBackground()
+    {
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                using var llmActivity = AppActivityTracker.BeginBusyScope();
+                await SetupLlmAsync().ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                LogMessage($"バックグラウンドLLMセットアップでエラーなのだ: {ex.Message}", LogLevel.Error);
+                Logger.LogException("バックグラウンドLLMセットアップ中にエラーが発生しました", ex);
+            }
+            finally
+            {
+                FlushLogBatchFinal();
+            }
+        });
     }
 
     /// <summary>
@@ -442,19 +466,18 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (_isProcessing)
-        {
-            LogMessage("別の処理が実行中なのだ。完了するまで待つのだ。");
-            return;
-        }
-
         if (_fileProcessor is null)
         {
             LogMessage("初期化が完了していないのだ。しばらく待つのだ。");
             return;
         }
 
-        ShowProcessing("ファイル変換中...", "ファイルを処理しています...");
+        if (!TryBeginUserOperation("ファイル変換中...", "ファイルを処理しています..."))
+        {
+            LogMessage(GetBusyMessage());
+            return;
+        }
+
         try
         {
             var pathArray = new string[paths.Count];
@@ -468,7 +491,7 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         {
             // 残っているログを全てフラッシュ
             FlushLogBatchFinal();
-            HideProcessing();
+            EndUserOperation();
             SetDropZoneDefault();
         }
     }
@@ -486,19 +509,18 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (_isProcessing)
-        {
-            LogMessage("別の処理が実行中なのだ。完了するまで待つのだ。");
-            return;
-        }
-
         if (_webScraperService is null)
         {
             LogMessage("初期化が完了していないのだ。しばらく待つのだ。");
             return;
         }
 
-        ShowProcessing("URL抽出中...", "Webページをスクレイピングしています...");
+        if (!TryBeginUserOperation("URL抽出中...", "Webページをスクレイピングしています..."))
+        {
+            LogMessage(GetBusyMessage());
+            return;
+        }
+
         try
         {
             // X.com ユーザーページの場合はサブフォルダを作成
@@ -594,9 +616,62 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
         finally
         {
             FlushLogBatchFinal();
-            HideProcessing();
+            EndUserOperation();
         }
     }
+
+    /// <summary>
+    /// ユーザー操作の排他をUI更新より先に同期的に確保する。
+    /// </summary>
+    private bool TryBeginUserOperation(string title, string status)
+    {
+        lock (_processingGate)
+        {
+            if (_isUserOperationRunning)
+            {
+                return false;
+            }
+
+            if (!AppActivityTracker.TryBeginBusyScope(out var scope))
+            {
+                return false;
+            }
+
+            _isUserOperationRunning = true;
+            _currentUserOperationScope = scope;
+        }
+
+        ShowProcessing(title, status);
+        return true;
+    }
+
+    /// <summary>
+    /// ユーザー操作の排他を解除する。
+    /// </summary>
+    private void EndUserOperation()
+    {
+        IDisposable? scope;
+
+        lock (_processingGate)
+        {
+            if (!_isUserOperationRunning)
+            {
+                return;
+            }
+
+            _isUserOperationRunning = false;
+            scope = _currentUserOperationScope;
+            _currentUserOperationScope = null;
+        }
+
+        scope?.Dispose();
+        HideProcessing();
+    }
+
+    private static string GetBusyMessage()
+        => AppActivityTracker.IsRestartReserved
+            ? "更新適用の再起動準備中なのだ。少し待ってほしいのだ。"
+            : "別の処理が実行中なのだ。完了するまで待つのだ。";
 
     /// <summary>
     /// 処理中オーバーレイを表示する
@@ -758,41 +833,6 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
     }
 
     // ────────────────────────────────────────────
-    //  GPU検出
-    // ────────────────────────────────────────────
-
-    /// <summary>
-    /// レジストリからAMD GPUの存在を検出する（WMI不要・AOT互換）。
-    /// </summary>
-    private static bool IsAmdGpuPresent()
-    {
-        try
-        {
-            // Display adapter のレジストリキーからGPU情報を取得
-            using var key = Microsoft.Win32.Registry.LocalMachine.OpenSubKey(
-                @"SYSTEM\CurrentControlSet\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}");
-            if (key is null) return false;
-
-            foreach (var subKeyName in key.GetSubKeyNames())
-            {
-                if (!char.IsDigit(subKeyName[0])) continue;
-                using var subKey = key.OpenSubKey(subKeyName);
-                var desc = subKey?.GetValue("DriverDesc")?.ToString() ?? "";
-                if (desc.Contains("AMD", StringComparison.OrdinalIgnoreCase) ||
-                    desc.Contains("Radeon", StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
-                }
-            }
-        }
-        catch
-        {
-            // レジストリ読み取り不可の場合はデフォルト（CUDA自動検出）に任せる
-        }
-        return false;
-    }
-
-    // ────────────────────────────────────────────
     //  IDisposable 実装
     // ────────────────────────────────────────────
 
@@ -840,6 +880,15 @@ public class MainWindowViewModel : ViewModelBase, IDisposable
             }
 
             // IDisposable を実装しているサービスを解放
+            IDisposable? operationScope = null;
+            lock (_processingGate)
+            {
+                operationScope = _currentUserOperationScope;
+                _currentUserOperationScope = null;
+                _isUserOperationRunning = false;
+            }
+            operationScope?.Dispose();
+
             try
             {
                 _webScraperService?.Dispose();

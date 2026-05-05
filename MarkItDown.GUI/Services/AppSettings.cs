@@ -147,6 +147,30 @@ public class AppSettings
     }
 
     /// <summary>
+    /// X/Instagram のログインセッションをアプリ配下に永続保存するかどうかを取得する。
+    /// 既定値は false。Cookie やセッション情報を残す場合だけ明示的に true にする。
+    /// </summary>
+    public static bool GetAllowSocialSessionPersistence()
+    {
+        lock (_lock)
+        {
+            try
+            {
+                var value = _settingsDocument?.Root?.Element("AllowSocialSessionPersistence")?.Value;
+                return bool.TryParse(value, out var result) && result;
+            }
+            catch (InvalidOperationException)
+            {
+                return false;
+            }
+            catch (XmlException)
+            {
+                return false;
+            }
+        }
+    }
+
+    /// <summary>
     /// 埋め込みPythonのバージョン文字列を保存する
     /// </summary>
     /// <param name="version">バージョン文字列（例: 3.12.0）</param>
@@ -208,7 +232,8 @@ public class AppSettings
                 new XElement("UpdateRepoOwner", "1llum1n4t1s"),
                 new XElement("UpdateRepoName", "MarkItDown.GUI"),
                 new XElement("UpdateChannel", "release"),
-                new XElement("PythonVersion", "")
+                new XElement("PythonVersion", ""),
+                new XElement("AllowSocialSessionPersistence", "false")
             );
 
             _settingsDocument = new XDocument(root);

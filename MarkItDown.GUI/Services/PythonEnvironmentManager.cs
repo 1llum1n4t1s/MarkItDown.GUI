@@ -122,6 +122,15 @@ public partial class PythonEnvironmentManager : IDisposable
             var managedEmbeddedPath = Path.Combine(libDirectory, "python", "python-embed");
             _logMessage($"管理対象Pythonパスなのだ: {managedEmbeddedPath}");
 
+            if (IsEmbeddedPythonReady(managedEmbeddedPath))
+            {
+                EnableSitePackages(managedEmbeddedPath);
+                _pythonExecutablePath = Path.Combine(managedEmbeddedPath, "python.exe");
+                _logMessage($"既存の管理対象Pythonを使用するのだ: {_pythonExecutablePath}");
+                _logMessage("通常起動ではPython本体の自動更新確認を行わないのだ。");
+                return true;
+            }
+
             var targetVersion = await GetTargetEmbeddedPythonVersionAsync(ct);
             _logMessage($"対象バージョンなのだ: {(string.IsNullOrEmpty(targetVersion) ? "なし" : targetVersion)}");
 
