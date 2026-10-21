@@ -4,7 +4,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_run:
-    workflows: ["Dependency validation"]
+    workflows: [".NET ビルド"]
     types: [completed]
   check_run:
     types: [completed]
@@ -35,7 +35,7 @@ jobs:
       - name: Verify CI and merge Dependabot updates
         uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
         env:
-          REQUIRED_WORKFLOWS: '[]'
+          REQUIRED_WORKFLOWS: '[".github/workflows/dotnet-build.yml"]'
         with:
           script: |
             // GitHub Actions の信頼済み既定ブランチ上で実行する。PR のコードは実行しない。
